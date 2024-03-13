@@ -1,4 +1,4 @@
-module skippy-bot
+module skippybot
 
 go 1.18
 
