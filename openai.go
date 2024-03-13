@@ -85,6 +85,71 @@ type Tool struct {
 
 var apiKey string
 
+func GetResponse(messageString string, threadId string) string {
+	apiKey = os.Getenv("OPEN_AI_KEY")
+	if apiKey == "" {
+		fmt.Println("could not read key")
+		os.Exit(1)
+	}
+  // TODO move out
+	assistantId := "asst_YZ9utNnMlf1973bcH5ND7Tf1"
+	// listAssistants()
+	// thread := startThread()
+	fmt.Printf("thread id: %s\n", threadId)
+
+	sendMessage(messageString, threadId)
+	initialRun := run(assistantId, threadId)
+	runId := initialRun.ID
+	fmt.Printf("Run id: %s\n", initialRun.ID)
+	fmt.Printf("Run status: %s\n", initialRun.Status)
+	runStatus := ""
+	runDelay := 1
+	for runStatus != "completed" {
+		run := getRun(threadId, runId)
+		// TODO: LOG
+		fmt.Printf("Run status: %s\n", run.Status)
+		runStatus = run.Status
+		time.Sleep(time.Duration(100*runDelay) * time.Millisecond)
+		runDelay++
+	}
+	messageList := listMessages(threadId)
+  fmt.Println(threadId)
+	fmt.Println(getFirstMessage(messageList))
+	return getFirstMessage(messageList)
+}
+
+func StartThread() Thread {
+	apiKey = os.Getenv("OPEN_AI_KEY")
+	if apiKey == "" {
+		fmt.Println("could not read key")
+		os.Exit(1)
+	}
+	url := "https://api.openai.com/v1/threads"
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer([]byte("{}")))
+
+	addHeaders(req)
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("POST error %s", err)
+	}
+	defer resp.Body.Close()
+
+	responseBody, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("Error reading resp %s", err)
+	}
+	fmt.Println(string(responseBody))
+
+	var thread Thread
+	if err := json.Unmarshal(responseBody, &thread); err != nil {
+		fmt.Printf("Error unmarshl  %s\n", err)
+	}
+
+	return thread
+}
+
 func run(assistantId string, threadId string) Run {
 	url := "https://api.openai.com/v1/threads/" + threadId + "/runs"
 
@@ -143,32 +208,6 @@ func sendMessage(messageString string, threadId string) {
 	fmt.Println(string(responseBody))
 }
 
-func startThread() Thread {
-	url := "https://api.openai.com/v1/threads"
-
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer([]byte("{}")))
-
-	addHeaders(req)
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Printf("POST error %s", err)
-	}
-	defer resp.Body.Close()
-
-	responseBody, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("Error reading resp %s", err)
-	}
-	fmt.Println(string(responseBody))
-
-	var thread Thread
-	if err := json.Unmarshal(responseBody, &thread); err != nil {
-		fmt.Printf("Error unmarshl  %s\n", err)
-	}
-
-	return thread
-}
 
 func getRun(threadId string, runId string) Run {
 	url := "https://api.openai.com/v1/threads/" + threadId + "/runs/" + runId
@@ -256,33 +295,3 @@ func addHeaders(req *http.Request) {
 	req.Header.Set("OpenAI-Beta", "assistants=v1")
 }
 
-func GetResponse(messageString string) string {
-	apiKey = os.Getenv("OPEN_AI_KEY")
-	if apiKey == "" {
-		fmt.Println("could not read key")
-		os.Exit(1)
-	}
-	assistantId := "asst_YZ9utNnMlf1973bcH5ND7Tf1"
-	// listAssistants()
-	thread := startThread()
-	fmt.Printf("thread id: %s\n", thread.ID)
-
-	sendMessage(messageString, thread.ID)
-	initialRun := run(assistantId, thread.ID)
-	runId := initialRun.ID
-	fmt.Printf("Run id: %s\n", initialRun.ID)
-	fmt.Printf("Run status: %s\n", initialRun.Status)
-	runStatus := ""
-	runDelay := 1
-	for runStatus != "completed" {
-		run := getRun(thread.ID, runId)
-		// TODO: LOG
-		fmt.Printf("Run status: %s\n", run.Status)
-		runStatus = run.Status
-		time.Sleep(time.Duration(100*runDelay) * time.Millisecond)
-		runDelay++
-	}
-	messageList := listMessages(thread.ID)
-	fmt.Println(getFirstMessage(messageList))
-	return getFirstMessage(messageList)
-}
