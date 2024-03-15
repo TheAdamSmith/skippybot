@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"time"
+  "log"
 )
 
 type Thread struct {
@@ -88,10 +89,10 @@ var apiKey string
 func GetResponse(messageString string, threadId string) string {
 	apiKey = os.Getenv("OPEN_AI_KEY")
 	if apiKey == "" {
-		fmt.Println("could not read key")
+		log.Fatalf("could not read key")
 		os.Exit(1)
 	}
-  // TODO move out
+	// TODO move out
 	assistantId := "asst_YZ9utNnMlf1973bcH5ND7Tf1"
 	// listAssistants()
 	// thread := startThread()
@@ -113,12 +114,13 @@ func GetResponse(messageString string, threadId string) string {
 		runDelay++
 	}
 	messageList := listMessages(threadId)
-  fmt.Println(threadId)
+	fmt.Println(threadId)
 	fmt.Println(getFirstMessage(messageList))
 	return getFirstMessage(messageList)
 }
 
 func StartThread() Thread {
+  log.Println("Creating thread...")
 	apiKey = os.Getenv("OPEN_AI_KEY")
 	if apiKey == "" {
 		fmt.Println("could not read key")
@@ -208,7 +210,6 @@ func sendMessage(messageString string, threadId string) {
 	fmt.Println(string(responseBody))
 }
 
-
 func getRun(threadId string, runId string) Run {
 	url := "https://api.openai.com/v1/threads/" + threadId + "/runs/" + runId
 	req, err := http.NewRequest("GET", url, nil)
@@ -294,4 +295,3 @@ func addHeaders(req *http.Request) {
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("OpenAI-Beta", "assistants=v1")
 }
-
