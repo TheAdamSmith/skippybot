@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/bwmarrin/discordgo"
+	openai "skippybot/openai"
 )
 
 func RunDiscord(token string, context *Context) {
@@ -67,7 +68,7 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, co
 	textOption := i.ApplicationCommandData().Options[0].StringValue()
 	if textOption == "newthread" {
 		log.Println("Handling newthread command. Attempting to reset thread")
-		context.UpdateThread(StartThread(context.OpenAIKey))
+		context.UpdateThread(openai.StartThread(context.OpenAIKey))
 		context.ResetTicker(THREAD_TIMEOUT)
 
 	}
@@ -97,7 +98,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate, context *Co
 	if context.CreateThread {
 		log.Println("Generating new thread.")
 		context.ResetTicker(THREAD_TIMEOUT)
-		context.UpdateThread(StartThread(context.OpenAIKey))
+		context.UpdateThread(openai.StartThread(context.OpenAIKey))
 		context.UpdateCreateThread(false)
 	}
 
@@ -107,7 +108,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate, context *Co
 	log.Printf("Recieved message: %s\n", message)
 
 	log.Println("Attempting to get response...")
-	response := GetResponse(m.Content, context.Thread.ID, context.OpenAIKey)
+	response :=openai.GetResponse(m.Content, context.Thread.ID, context.OpenAIKey)
 
 	s.ChannelMessageSend(m.ChannelID, response)
 

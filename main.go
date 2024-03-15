@@ -6,17 +6,18 @@ import (
 	"github.com/joho/godotenv"
 	"log"
 	"os"
+	openai "skippybot/openai"
 	"time"
 )
 
 type Context struct {
-	Thread       Thread
+	Thread       openai.Thread
 	CreateThread bool
 	Ticker       *time.Ticker
 	OpenAIKey    string
 }
 
-func (c *Context) UpdateThread(thread Thread) {
+func (c *Context) UpdateThread(thread openai.Thread) {
 	c.Thread = thread
 }
 
@@ -49,7 +50,7 @@ func main() {
 	}
 
 	context := &Context{
-		Thread:       StartThread(openAIKey),
+		Thread:       openai.StartThread(openAIKey),
 		CreateThread: false,
 		Ticker:       time.NewTicker(30 * time.Minute),
 		OpenAIKey:    openAIKey,
