@@ -92,35 +92,31 @@ func GetResponse(messageString string, threadId string, apiKey string) string {
 		log.Fatalf("could not read key")
 		os.Exit(1)
 	}
-	// TODO move out
+
+  // TODO: add to context
 	assistantId := "asst_YZ9utNnMlf1973bcH5ND7Tf1"
-	// listAssistants()
-	// thread := startThread()
-	fmt.Printf("thread id: %s\n", threadId)
 
 	sendMessage(messageString, threadId, apiKey)
 	initialRun := run(assistantId, threadId, apiKey)
 	runId := initialRun.ID
-	fmt.Printf("Run id: %s\n", initialRun.ID)
-	fmt.Printf("Run status: %s\n", initialRun.Status)
+	log.Printf("Initial Run id: %s\n", initialRun.ID)
+	log.Printf("Run status: %s\n", initialRun.Status)
 	runStatus := ""
 	runDelay := 1
 	for runStatus != "completed" {
 		run := getRun(threadId, runId, apiKey)
-		// TODO: LOG
-		fmt.Printf("Run status: %s\n", run.Status)
+		log.Printf("Run status: %s\n", run.Status)
 		runStatus = run.Status
 		time.Sleep(time.Duration(100*runDelay) * time.Millisecond)
 		runDelay++
 	}
 	messageList := listMessages(threadId, apiKey)
-	fmt.Println(threadId)
-	fmt.Println(getFirstMessage(messageList))
+  log.Println("Recieived message from thread: ", threadId)
+	log.Println(getFirstMessage(messageList))
 	return getFirstMessage(messageList)
 }
 
 func StartThread(apiKey string) Thread {
-  log.Printf("API_KEY: %s\n", apiKey)
 	url := "https://api.openai.com/v1/threads"
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer([]byte("{}")))
@@ -129,21 +125,20 @@ func StartThread(apiKey string) Thread {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Printf("POST error %s", err)
+		log.Printf("POST error %s\n", err)
 	}
 	defer resp.Body.Close()
 
 	responseBody, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Printf("Error reading resp %s", err)
+		log.Printf("Error reading resp %s\n", err)
 	}
-	fmt.Println(string(responseBody))
 
 	var thread Thread
 	if err := json.Unmarshal(responseBody, &thread); err != nil {
-		fmt.Printf("Error unmarshl  %s\n", err)
+    log.Printf("Error unmarshalling thread:  %s\n", err)
 	}
-
+  log.Println("Successfully start thread: " , thread.ID)
 	return thread
 }
 
@@ -153,27 +148,26 @@ func run(assistantId string, threadId string, apiKey string) Run {
 	reqData := RunReq{AssistantId: assistantId, Instructions: ""}
 	jsonData, err := json.Marshal(reqData)
 	if err != nil {
-		fmt.Printf("Error Marshal %s\n", err)
+    log.Println("Error Marshalling: ", err)
 	}
-	fmt.Println(string(jsonData))
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	addHeaders(req, apiKey)
+
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Printf("POST error %s", err)
+    log.Println("POST error: ", err)
 	}
 	defer resp.Body.Close()
 
 	responseBody, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Printf("Error reading resp %s", err)
+		log.Println("Error reading resp %s", err)
 	}
-	// fmt.Println(string(responseBody))
 	var run Run
 	if err := json.Unmarshal(responseBody, &run); err != nil {
-		fmt.Printf("Error unmarshl  %s\n", err)
+    log.Println("Error unmarshalling: ", err)
 	}
 
 	return run
@@ -187,22 +181,18 @@ func sendMessage(messageString string, threadId string, apiKey string) {
 	if err != nil {
 		fmt.Printf("Error Marshal %s\n", err)
 	}
-	fmt.Println(string(jsonData))
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	addHeaders(req, apiKey)
+
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Printf("POST error %s", err)
+    log.Println("POST error: ", err)
 	}
+
 	defer resp.Body.Close()
 
-	responseBody, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("Error reading resp %s", err)
-	}
-	fmt.Println(string(responseBody))
 }
 
 func getRun(threadId string, runId string, apiKey string) Run {
@@ -213,18 +203,18 @@ func getRun(threadId string, runId string, apiKey string) Run {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Printf("GET error %s", err)
+    log.Println("GET error: ", err)
 	}
 	defer resp.Body.Close()
 
 	responseBody, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Printf("Error reading resp %s", err)
+    log.Println("Error reading resp: ", err)
 	}
 
 	var run Run
 	if err := json.Unmarshal(responseBody, &run); err != nil {
-		fmt.Printf("Error unmarshl  %s\n", err)
+    log.Println("Error unmarshalling:", err)
 	}
 
 	return run
@@ -258,17 +248,18 @@ func listMessages(threadId string, apiKey string) MessageList {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Printf("GET error %s", err)
+		log.Printf("GET error %s", err)
 	}
 	defer resp.Body.Close()
 
 	responseBody, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Printf("Error reading resp %s", err)
+    log.Println("Error reading resp: ", err)
 	}
+
 	var messageList MessageList
 	if err := json.Unmarshal(responseBody, &messageList); err != nil {
-		fmt.Printf("Error unmarshl  %s\n", err)
+    log.Println("Error unmarshalling: ", err)
 	}
 
 	return messageList
@@ -277,7 +268,6 @@ func listMessages(threadId string, apiKey string) MessageList {
 func getFirstMessage(messageList MessageList) string {
 	firstId := messageList.FirstID
 	for _, message := range messageList.Data {
-		fmt.Printf("Message ID: %s\n", message.ID)
 		if message.ID == firstId {
 			return message.Content[0].Text.Value
 		}

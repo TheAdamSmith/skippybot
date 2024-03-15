@@ -3,16 +3,17 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/joho/godotenv"
+	"log"
+	"os"
 	"time"
-  "log"
-  "os"
 )
 
 type Context struct {
-	Thread Thread
-  CreateThread bool
-	Ticker *time.Ticker
-  OpenAIKey string
+	Thread       Thread
+	CreateThread bool
+	Ticker       *time.Ticker
+	OpenAIKey    string
 }
 
 func (c *Context) UpdateThread(thread Thread) {
@@ -30,32 +31,40 @@ func (c *Context) ResetTicker(min int) {
 var THREAD_TIMEOUT = 30
 
 func main() {
-  log.Println("Initializing...")
-  openAIKey := os.Getenv("OPEN_AI_KEY")
-  log.Printf("API_KEY: %s\n", openAIKey)
-
+	log.SetFlags(log.Ltime | log.Lshortfile)
+	log.Println("Initializing...")
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatalln("Unable to load env variables")
+	}
+	openAIKey := os.Getenv("OPEN_AI_KEY")
 	if openAIKey == "" {
-		log.Fatalf("could not read key")
-		os.Exit(1)
+		log.Fatalln("Unable to get Open AI API Key")
+	}
+
+	token := os.Getenv("DISCORD_TOKEN")
+
+	if token == "" {
+		log.Fatalln("could not read discord token")
 	}
 
 	context := &Context{
-		Thread: StartThread(openAIKey),
-    CreateThread: false,
-		Ticker: time.NewTicker(30 * time.Minute),
-    OpenAIKey: openAIKey,
+		Thread:       StartThread(openAIKey),
+		CreateThread: false,
+		Ticker:       time.NewTicker(30 * time.Minute),
+		OpenAIKey:    openAIKey,
 	}
 
 	defer context.Ticker.Stop()
 
 	go func() {
 		for range context.Ticker.C {
-      log.Println("Recieved tick. Setting to create new thread with next message")
-      context.UpdateCreateThread(true)
+			log.Println("Recieved tick. Setting to create new thread with next message")
+			context.UpdateCreateThread(true)
 		}
 	}()
 
-	RunDiscord(context)
+	RunDiscord(token, context)
 }
 
 func printStruct(v any) {

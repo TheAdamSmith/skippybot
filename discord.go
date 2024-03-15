@@ -2,26 +2,23 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/joho/godotenv"
 )
 
-func RunDiscord(context *Context) {
-	err := godotenv.Load()
-	token := os.Getenv("DISCORD_TOKEN")
+func RunDiscord(token string, context *Context) {
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
-		fmt.Println("error creating Discord session,", err)
-		return
+		log.Fatalln("Unabel to get discord client")
 	}
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
-			messageCreate(s, m, context)
+		messageCreate(s, m, context)
 	})
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if i.Type == discordgo.InteractionApplicationCommand {
@@ -31,8 +28,7 @@ func RunDiscord(context *Context) {
 
 	err = dg.Open()
 	if err != nil {
-		fmt.Println("error opening connection,", err)
-		return
+		log.Fatalln("Unabel to open discord client")
 	}
 
 	command := discordgo.ApplicationCommand{
@@ -50,11 +46,11 @@ func RunDiscord(context *Context) {
 
 	_, err = dg.ApplicationCommandCreate(dg.State.User.ID, "", &command)
 	if err != nil {
-		fmt.Println("Error creating application commands", err)
+		log.Printf("Error creating application commands: %s\n", err)
 		return
 	}
 
-	fmt.Println("Bot is now running. Press CTRL+C to exit.")
+	log.Println("Bot is now running. Press CTRL+C to exit.")
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
 	<-sc
@@ -63,7 +59,6 @@ func RunDiscord(context *Context) {
 }
 
 func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, context *Context) {
-	fmt.Println(i.ApplicationCommandData().Name)
 	if i.ApplicationCommandData().Name != "skippy" {
 		return
 	}
@@ -71,7 +66,7 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, co
 	// TODO: add flag handling
 	textOption := i.ApplicationCommandData().Options[0].StringValue()
 	if textOption == "newthread" {
-		fmt.Println("atempting to reset thread")
+		log.Println("Handling newthread command. Attempting to reset thread")
 		context.UpdateThread(StartThread(context.OpenAIKey))
 		context.ResetTicker(THREAD_TIMEOUT)
 
@@ -79,11 +74,11 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, co
 	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
-			Content: textOption,
+			Content: "Created new thread",
 		},
 	})
 	if err != nil {
-		fmt.Println("Error responding to slash command: ", err)
+		log.Printf("Error responding to slash command: %s\n", err)
 	}
 }
 
@@ -92,34 +87,37 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate, context *Co
 	if m.Author.ID == s.State.User.ID {
 		return
 	}
-	fmt.Printf("Message: %s", m.Content)
-	fmt.Printf("User: %s", s.State.User.ID)
+	log.Printf("Recieved Message: %s\n", m.Content)
+	log.Printf("Current User: %s\n", s.State.User.ID)
 	// Check if the bot is mentioned
 	if !isMentioned(m.Mentions, s.State.User.ID) {
 		return
 	}
 
 	if context.CreateThread {
-		fmt.Println("creating new thread")
-    context.ResetTicker(THREAD_TIMEOUT)
-    context.UpdateThread(StartThread(context.OpenAIKey))
-    context.UpdateCreateThread(false)
+		log.Println("Generating new thread.")
+		context.ResetTicker(THREAD_TIMEOUT)
+		context.UpdateThread(StartThread(context.OpenAIKey))
+		context.UpdateCreateThread(false)
 	}
 
 	s.ChannelTyping(m.ChannelID)
-	fmt.Println("attempting to get response")
+
+	message := removeBotMention(m.Content, s.State.User.ID)
+	log.Printf("Recieved message: %s\n", message)
+
+	log.Println("Attempting to get response...")
 	response := GetResponse(m.Content, context.Thread.ID, context.OpenAIKey)
-	fmt.Println(response)
+
 	s.ChannelMessageSend(m.ChannelID, response)
 
 }
 
 func removeBotMention(content string, botID string) string {
-	// Prepare the mention patterns for the bot with and without a nickname
 	mentionPattern := fmt.Sprintf("<@%s>", botID)
+	// remove nicknames
 	mentionPatternNick := fmt.Sprintf("<@!%s>", botID)
 
-	// Replace the bot's mentions with an empty string
 	content = strings.Replace(content, mentionPattern, "", -1)
 	content = strings.Replace(content, mentionPatternNick, "", -1)
 	return content
@@ -128,8 +126,6 @@ func removeBotMention(content string, botID string) string {
 func isMentioned(mentions []*discordgo.User, botId string) bool {
 	for _, user := range mentions {
 		if user.ID == botId {
-			fmt.Println(user.ID)
-			fmt.Println(botId)
 			return true
 		}
 	}
