@@ -86,7 +86,7 @@ type Tool struct {
 
 var apiKey string
 
-func GetResponse(messageString string, threadId string) string {
+func GetResponse(messageString string, threadId string, apiKey string) string {
 	apiKey = os.Getenv("OPEN_AI_KEY")
 	if apiKey == "" {
 		log.Fatalf("could not read key")
@@ -98,39 +98,34 @@ func GetResponse(messageString string, threadId string) string {
 	// thread := startThread()
 	fmt.Printf("thread id: %s\n", threadId)
 
-	sendMessage(messageString, threadId)
-	initialRun := run(assistantId, threadId)
+	sendMessage(messageString, threadId, apiKey)
+	initialRun := run(assistantId, threadId, apiKey)
 	runId := initialRun.ID
 	fmt.Printf("Run id: %s\n", initialRun.ID)
 	fmt.Printf("Run status: %s\n", initialRun.Status)
 	runStatus := ""
 	runDelay := 1
 	for runStatus != "completed" {
-		run := getRun(threadId, runId)
+		run := getRun(threadId, runId, apiKey)
 		// TODO: LOG
 		fmt.Printf("Run status: %s\n", run.Status)
 		runStatus = run.Status
 		time.Sleep(time.Duration(100*runDelay) * time.Millisecond)
 		runDelay++
 	}
-	messageList := listMessages(threadId)
+	messageList := listMessages(threadId, apiKey)
 	fmt.Println(threadId)
 	fmt.Println(getFirstMessage(messageList))
 	return getFirstMessage(messageList)
 }
 
-func StartThread() Thread {
-  log.Println("Creating thread...")
-	apiKey = os.Getenv("OPEN_AI_KEY")
-	if apiKey == "" {
-		fmt.Println("could not read key")
-		os.Exit(1)
-	}
+func StartThread(apiKey string) Thread {
+  log.Printf("API_KEY: %s\n", apiKey)
 	url := "https://api.openai.com/v1/threads"
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer([]byte("{}")))
 
-	addHeaders(req)
+	addHeaders(req, apiKey)
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -152,7 +147,7 @@ func StartThread() Thread {
 	return thread
 }
 
-func run(assistantId string, threadId string) Run {
+func run(assistantId string, threadId string, apiKey string) Run {
 	url := "https://api.openai.com/v1/threads/" + threadId + "/runs"
 
 	reqData := RunReq{AssistantId: assistantId, Instructions: ""}
@@ -163,7 +158,7 @@ func run(assistantId string, threadId string) Run {
 	fmt.Println(string(jsonData))
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 
-	addHeaders(req)
+	addHeaders(req, apiKey)
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -184,7 +179,7 @@ func run(assistantId string, threadId string) Run {
 	return run
 }
 
-func sendMessage(messageString string, threadId string) {
+func sendMessage(messageString string, threadId string, apiKey string) {
 	url := "https://api.openai.com/v1/threads/" + threadId + "/messages"
 
 	message := MessageReq{Role: "user", Content: messageString}
@@ -195,7 +190,7 @@ func sendMessage(messageString string, threadId string) {
 	fmt.Println(string(jsonData))
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 
-	addHeaders(req)
+	addHeaders(req, apiKey)
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -210,11 +205,11 @@ func sendMessage(messageString string, threadId string) {
 	fmt.Println(string(responseBody))
 }
 
-func getRun(threadId string, runId string) Run {
+func getRun(threadId string, runId string, apiKey string) Run {
 	url := "https://api.openai.com/v1/threads/" + threadId + "/runs/" + runId
 	req, err := http.NewRequest("GET", url, nil)
 
-	addHeaders(req)
+	addHeaders(req, apiKey)
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -235,11 +230,11 @@ func getRun(threadId string, runId string) Run {
 	return run
 }
 
-func listAssistants() {
+func ListAssistants(apiKey string) {
 	url := "https://api.openai.com/v1/assistants"
 	req, err := http.NewRequest("GET", url, nil)
 
-	addHeaders(req)
+	addHeaders(req, apiKey)
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -255,11 +250,11 @@ func listAssistants() {
 	fmt.Println("Response:", string(responseBody))
 }
 
-func listMessages(threadId string) MessageList {
+func listMessages(threadId string, apiKey string) MessageList {
 	url := "https://api.openai.com/v1/threads/" + threadId + "/messages"
 	req, err := http.NewRequest("GET", url, nil)
 
-	addHeaders(req)
+	addHeaders(req, apiKey)
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -290,7 +285,7 @@ func getFirstMessage(messageList MessageList) string {
 	return ""
 }
 
-func addHeaders(req *http.Request) {
+func addHeaders(req *http.Request, apiKey string) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("OpenAI-Beta", "assistants=v1")

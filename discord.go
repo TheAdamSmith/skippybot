@@ -1,4 +1,3 @@
-
 package main
 
 import (
@@ -7,7 +6,6 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
@@ -21,7 +19,10 @@ func RunDiscord(context *Context) {
 		fmt.Println("error creating Discord session,", err)
 		return
 	}
-	dg.AddHandler(messageCreate)
+
+	dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
+			messageCreate(s, m, context)
+	})
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if i.Type == discordgo.InteractionApplicationCommand {
 			handleSlashCommand(s, i, context)
@@ -36,7 +37,7 @@ func RunDiscord(context *Context) {
 
 	command := discordgo.ApplicationCommand{
 		Name:        "skippy",
-		Description: "Talk to Skippy the Magnificent",
+		Description: "Control Skippy the Magnificent",
 		Options: []*discordgo.ApplicationCommandOption{
 			{
 				Type:        discordgo.ApplicationCommandOptionString,
@@ -71,8 +72,8 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, co
 	textOption := i.ApplicationCommandData().Options[0].StringValue()
 	if textOption == "newthread" {
 		fmt.Println("atempting to reset thread")
-    context.UpdateThread(StartThread())
-    context.ResetTicker(THREAD_TIMEOUT)
+		context.UpdateThread(StartThread(context.OpenAIKey))
+		context.ResetTicker(THREAD_TIMEOUT)
 
 	}
 	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -86,28 +87,28 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, co
 	}
 }
 
-func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
+func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate, context *Context) {
 	// Ignore all messages created by the bot itself
 	if m.Author.ID == s.State.User.ID {
 		return
 	}
-  fmt.Printf("Message: %s", m.Content)
-  fmt.Printf("User: %s", s.State.User.ID)
+	fmt.Printf("Message: %s", m.Content)
+	fmt.Printf("User: %s", s.State.User.ID)
 	// Check if the bot is mentioned
 	if !isMentioned(m.Mentions, s.State.User.ID) {
 		return
 	}
 
-	if createThread {
+	if context.CreateThread {
 		fmt.Println("creating new thread")
-		timer = time.NewTimer(30 * time.Minute)
-		thread = StartThread()
-		createThread = true
+    context.ResetTicker(THREAD_TIMEOUT)
+    context.UpdateThread(StartThread(context.OpenAIKey))
+    context.UpdateCreateThread(false)
 	}
 
 	s.ChannelTyping(m.ChannelID)
 	fmt.Println("attempting to get response")
-	response := GetResponse(m.Content, thread.ID)
+	response := GetResponse(m.Content, context.Thread.ID, context.OpenAIKey)
 	fmt.Println(response)
 	s.ChannelMessageSend(m.ChannelID, response)
 
