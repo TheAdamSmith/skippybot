@@ -5,48 +5,69 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
-	"os"
 	"time"
-  "log"
 )
 
-func GetResponse(messageString string, threadId string, apiKey string) string {
-	apiKey = os.Getenv("OPEN_AI_KEY")
-	if apiKey == "" {
-		log.Fatalf("could not read key")
-		os.Exit(1)
+type Client struct {
+	OpenAIApiKey  string
+	AssistantID   string
+	ThreadID      string
+	Ticker        *time.Ticker
+	ThreadTimeout int
+}
+
+func NewClient(apiKey string, assistantID string) *Client {
+	return &Client{OpenAIApiKey: apiKey, AssistantID: assistantID, Ticker: time.NewTicker(30*time.Minute), ThreadTimeout: 30}
+}
+
+func (c *Client) Close() {
+  log.Println("Recieved close command. Stopping ticker")
+  c.Ticker.Stop()
+}
+
+func (c *Client) GetResponse(messageString string) string {
+	if c.ThreadID == "" {
+		log.Println("Tried to get response without thread set. Starting new thread")
+		c.ThreadID = c.StartThread().ID
 	}
 
-  // TODO: add to context
-	assistantId := "asst_YZ9utNnMlf1973bcH5ND7Tf1"
+	go func() {
+		for range c.Ticker.C {
+			log.Println("Recieved tick. Starting new thread.")
+			c.ThreadID = c.StartThread().ID
+		}
+	}()
 
-	sendMessage(messageString, threadId, apiKey)
-	initialRun := run(assistantId, threadId, apiKey)
+	sendMessage(messageString, c.ThreadID, c.OpenAIApiKey)
+	initialRun := run(c.AssistantID, c.ThreadID, c.OpenAIApiKey)
 	runId := initialRun.ID
-	log.Printf("Initial Run id: %s\n", initialRun.ID)
-	log.Printf("Run status: %s\n", initialRun.Status)
+	log.Println("Initial Run id: ", initialRun.ID)
+	log.Println("Run status: ", initialRun.Status)
 	runStatus := ""
 	runDelay := 1
 	for runStatus != "completed" {
-		run := getRun(threadId, runId, apiKey)
+		run := getRun(runId, c.ThreadID, c.OpenAIApiKey)
 		log.Printf("Run status: %s\n", run.Status)
 		runStatus = run.Status
 		time.Sleep(time.Duration(100*runDelay) * time.Millisecond)
 		runDelay++
 	}
-	messageList := listMessages(threadId, apiKey)
-  log.Println("Recieived message from thread: ", threadId)
+	messageList := listMessages(c.ThreadID, c.OpenAIApiKey)
+	log.Println("Recieived message from thread: ", c.ThreadID)
 	log.Println(getFirstMessage(messageList))
 	return getFirstMessage(messageList)
 }
 
-func StartThread(apiKey string) Thread {
+func (c *Client) StartThread() Thread {
+	// reset ticker whenever we start a new thread
+	c.Ticker.Reset(time.Duration(c.ThreadTimeout) * time.Minute)
 	url := "https://api.openai.com/v1/threads"
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer([]byte("{}")))
+	addHeaders(req, c.OpenAIApiKey)
 
-	addHeaders(req, apiKey)
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -61,10 +82,30 @@ func StartThread(apiKey string) Thread {
 
 	var thread Thread
 	if err := json.Unmarshal(responseBody, &thread); err != nil {
-    log.Printf("Error unmarshalling thread:  %s\n", err)
+		log.Printf("Error unmarshalling thread:  %s\n", err)
 	}
-  log.Println("Successfully start thread: " , thread.ID)
+	log.Println("Successfully start thread: ", thread.ID)
 	return thread
+}
+
+func (c *Client) ListAssistants() {
+	url := "https://api.openai.com/v1/assistants"
+	req, err := http.NewRequest("GET", url, nil)
+
+	addHeaders(req, c.OpenAIApiKey)
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("GET error %s", err)
+	}
+	defer resp.Body.Close()
+
+	responseBody, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("Error reading resp %s", err)
+		return
+	}
+	fmt.Println("Response:", string(responseBody))
 }
 
 func run(assistantId string, threadId string, apiKey string) Run {
@@ -73,7 +114,7 @@ func run(assistantId string, threadId string, apiKey string) Run {
 	reqData := RunReq{AssistantId: assistantId, Instructions: ""}
 	jsonData, err := json.Marshal(reqData)
 	if err != nil {
-    log.Println("Error Marshalling: ", err)
+		log.Println("Error Marshalling: ", err)
 	}
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
@@ -82,17 +123,17 @@ func run(assistantId string, threadId string, apiKey string) Run {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-    log.Println("POST error: ", err)
+		log.Println("POST error: ", err)
 	}
 	defer resp.Body.Close()
 
 	responseBody, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Println("Error reading resp %s", err)
+		log.Println("Error reading resp: ", err)
 	}
 	var run Run
 	if err := json.Unmarshal(responseBody, &run); err != nil {
-    log.Println("Error unmarshalling: ", err)
+		log.Println("Error unmarshalling: ", err)
 	}
 
 	return run
@@ -113,14 +154,14 @@ func sendMessage(messageString string, threadId string, apiKey string) {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-    log.Println("POST error: ", err)
+		log.Println("POST error: ", err)
 	}
 
 	defer resp.Body.Close()
 
 }
 
-func getRun(threadId string, runId string, apiKey string) Run {
+func getRun(runId string, threadId string, apiKey string) Run {
 	url := "https://api.openai.com/v1/threads/" + threadId + "/runs/" + runId
 	req, err := http.NewRequest("GET", url, nil)
 
@@ -128,41 +169,21 @@ func getRun(threadId string, runId string, apiKey string) Run {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-    log.Println("GET error: ", err)
+		log.Println("GET error: ", err)
 	}
 	defer resp.Body.Close()
 
 	responseBody, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-    log.Println("Error reading resp: ", err)
+		log.Println("Error reading resp: ", err)
 	}
 
 	var run Run
 	if err := json.Unmarshal(responseBody, &run); err != nil {
-    log.Println("Error unmarshalling:", err)
+		log.Println("Error unmarshalling:", err)
 	}
 
 	return run
-}
-
-func ListAssistants(apiKey string) {
-	url := "https://api.openai.com/v1/assistants"
-	req, err := http.NewRequest("GET", url, nil)
-
-	addHeaders(req, apiKey)
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Printf("GET error %s", err)
-	}
-	defer resp.Body.Close()
-
-	responseBody, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("Error reading resp %s", err)
-		return
-	}
-	fmt.Println("Response:", string(responseBody))
 }
 
 func listMessages(threadId string, apiKey string) MessageList {
@@ -179,12 +200,12 @@ func listMessages(threadId string, apiKey string) MessageList {
 
 	responseBody, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-    log.Println("Error reading resp: ", err)
+		log.Println("Error reading resp: ", err)
 	}
 
 	var messageList MessageList
 	if err := json.Unmarshal(responseBody, &messageList); err != nil {
-    log.Println("Error unmarshalling: ", err)
+		log.Println("Error unmarshalling: ", err)
 	}
 
 	return messageList

@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	openai "skippybot/openai"
+	discord "skippybot/discord"
 	"time"
 )
 
@@ -29,7 +30,7 @@ func (c *Context) ResetTicker(min int) {
 	c.Ticker.Reset(time.Duration(min) * time.Minute)
 }
 
-var THREAD_TIMEOUT = 30
+const THREAD_TIMEOUT = 30
 
 func main() {
 	log.SetFlags(log.Ltime | log.Lshortfile)
@@ -49,23 +50,11 @@ func main() {
 		log.Fatalln("could not read discord token")
 	}
 
-	context := &Context{
-		Thread:       openai.StartThread(openAIKey),
-		CreateThread: false,
-		Ticker:       time.NewTicker(30 * time.Minute),
-		OpenAIKey:    openAIKey,
-	}
+	assistantId := "asst_YZ9utNnMlf1973bcH5ND7Tf1"
+  client := openai.NewClient(openAIKey, assistantId)
+  defer client.Close()
 
-	defer context.Ticker.Stop()
-
-	go func() {
-		for range context.Ticker.C {
-			log.Println("Recieved tick. Setting to create new thread with next message")
-			context.UpdateCreateThread(true)
-		}
-	}()
-
-	RunDiscord(token, context)
+	discord.RunDiscord(token, client)
 }
 
 func printStruct(v any) {

@@ -1,4 +1,4 @@
-package main
+package discord
 
 import (
 	"fmt"
@@ -12,18 +12,19 @@ import (
 	openai "skippybot/openai"
 )
 
-func RunDiscord(token string, context *Context) {
+// TODO: pass in startNewThread func
+func RunDiscord(token string, client *openai.Client) {
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
 		log.Fatalln("Unabel to get discord client")
 	}
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
-		messageCreate(s, m, context)
+		messageCreate(s, m, client)
 	})
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if i.Type == discordgo.InteractionApplicationCommand {
-			handleSlashCommand(s, i, context)
+			handleSlashCommand(s, i, client)
 		}
 	})
 
@@ -48,7 +49,6 @@ func RunDiscord(token string, context *Context) {
 	_, err = dg.ApplicationCommandCreate(dg.State.User.ID, "", &command)
 	if err != nil {
 		log.Printf("Error creating application commands: %s\n", err)
-		return
 	}
 
 	log.Println("Bot is now running. Press CTRL+C to exit.")
@@ -59,7 +59,7 @@ func RunDiscord(token string, context *Context) {
 	dg.Close()
 }
 
-func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, context *Context) {
+func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, client *openai.Client) {
 	if i.ApplicationCommandData().Name != "skippy" {
 		return
 	}
@@ -68,9 +68,7 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, co
 	textOption := i.ApplicationCommandData().Options[0].StringValue()
 	if textOption == "newthread" {
 		log.Println("Handling newthread command. Attempting to reset thread")
-		context.UpdateThread(openai.StartThread(context.OpenAIKey))
-		context.ResetTicker(THREAD_TIMEOUT)
-
+    client.ThreadID = client.StartThread().ID
 	}
 	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -83,7 +81,7 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, co
 	}
 }
 
-func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate, context *Context) {
+func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate, client *openai.Client) {
 	// Ignore all messages created by the bot itself
 	if m.Author.ID == s.State.User.ID {
 		return
@@ -95,20 +93,13 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate, context *Co
 		return
 	}
 
-	if context.CreateThread {
-		log.Println("Generating new thread.")
-		context.ResetTicker(THREAD_TIMEOUT)
-		context.UpdateThread(openai.StartThread(context.OpenAIKey))
-		context.UpdateCreateThread(false)
-	}
-
 	s.ChannelTyping(m.ChannelID)
 
 	message := removeBotMention(m.Content, s.State.User.ID)
 	log.Printf("Recieved message: %s\n", message)
 
 	log.Println("Attempting to get response...")
-	response :=openai.GetResponse(m.Content, context.Thread.ID, context.OpenAIKey)
+	response :=client.GetResponse(m.Content)
 
 	s.ChannelMessageSend(m.ChannelID, response)
 
