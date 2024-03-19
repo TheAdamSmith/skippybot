@@ -15,6 +15,7 @@ type MessageReq struct {
 type RunReq struct {
 	AssistantId  string `json:"assistant_id"`
 	Instructions string `json:"instructions"`
+	AdditionalInstructions string `json:"additional_instructions,omitempty"`
 }
 
 type MessageList struct {

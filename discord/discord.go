@@ -2,11 +2,14 @@ package discord
 
 import (
 	"fmt"
+  "net/http"
+  "io"
 	"log"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+  // "math/rand"
 
 	"github.com/bwmarrin/discordgo"
 	openai "skippybot/openai"
@@ -68,7 +71,7 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, cl
 	textOption := i.ApplicationCommandData().Options[0].StringValue()
 	if textOption == "newthread" {
 		log.Println("Handling newthread command. Attempting to reset thread")
-    client.ThreadID = client.StartThread().ID
+		client.ThreadID = client.StartThread().ID
 	}
 	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -92,17 +95,56 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate, client *ope
 	if !isMentioned(m.Mentions, s.State.User.ID) {
 		return
 	}
+	message := removeBotMention(m.Content, s.State.User.ID)
+  for _, attachment:= range m.Attachments{
+    log.Println("Attachment url: ", attachment.URL)
+    // downloadAttachment(attachment.URL, fmt.Sprint(rand.Int()) + ".jpg")    
+    message += " " + removeQuery(attachment.URL)
 
+  }
 	s.ChannelTyping(m.ChannelID)
 
-	message := removeBotMention(m.Content, s.State.User.ID)
 	log.Printf("Recieved message: %s\n", message)
 
 	log.Println("Attempting to get response...")
-	response :=client.GetResponse(m.Content)
+	response := client.GetResponse(m.Content)
 
 	s.ChannelMessageSend(m.ChannelID, response)
 
+}
+
+func removeQuery(url string) string {
+    // Find the index of the first occurrence of "?"
+    index := strings.Index(url, "?")
+    
+    // If "?" is found, return the substring up to the "?"
+    if index != -1 {
+        return url[:index]
+    }
+    
+    // If "?" is not found, return the original URL
+    return url
+}
+
+func downloadAttachment(url string, filename string) error {
+    // Get the data
+    resp, err := http.Get(url)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+
+    log.Println("download successful attempting to write")
+    // Create the file
+    out, err := os.Create(filename)
+    if err != nil {
+        return err
+    }
+    defer out.Close()
+
+    // Write the body to file
+    _, err = io.Copy(out, resp.Body)
+    return err
 }
 
 func removeBotMention(content string, botID string) string {

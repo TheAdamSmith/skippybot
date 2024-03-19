@@ -14,6 +14,7 @@ type Client struct {
 	OpenAIApiKey  string
 	AssistantID   string
 	ThreadID      string
+  AdditionalInstructions string
 	Ticker        *time.Ticker
 	ThreadTimeout int
 }
@@ -22,6 +23,9 @@ func NewClient(apiKey string, assistantID string) *Client {
 	return &Client{OpenAIApiKey: apiKey, AssistantID: assistantID, Ticker: time.NewTicker(30*time.Minute), ThreadTimeout: 30}
 }
 
+func (c *Client) UpdateAdditionalInstructions(instructions string) {
+  c.AdditionalInstructions = instructions
+}
 func (c *Client) Close() {
   log.Println("Recieved close command. Stopping ticker")
   c.Ticker.Stop()
@@ -41,7 +45,7 @@ func (c *Client) GetResponse(messageString string) string {
 	}()
 
 	sendMessage(messageString, c.ThreadID, c.OpenAIApiKey)
-	initialRun := run(c.AssistantID, c.ThreadID, c.OpenAIApiKey)
+	initialRun := c.run()
 	runId := initialRun.ID
 	log.Println("Initial Run id: ", initialRun.ID)
 	log.Println("Run status: ", initialRun.Status)
@@ -108,17 +112,19 @@ func (c *Client) ListAssistants() {
 	fmt.Println("Response:", string(responseBody))
 }
 
-func run(assistantId string, threadId string, apiKey string) Run {
-	url := "https://api.openai.com/v1/threads/" + threadId + "/runs"
+func (c *Client) run() Run {
+	url := "https://api.openai.com/v1/threads/" + c.ThreadID + "/runs"
 
-	reqData := RunReq{AssistantId: assistantId, Instructions: ""}
+  log.Println(" add instructions: " , c.AdditionalInstructions)
+	reqData := RunReq{AssistantId: c.AssistantID, Instructions: "", AdditionalInstructions: c.AdditionalInstructions}
 	jsonData, err := json.Marshal(reqData)
 	if err != nil {
 		log.Println("Error Marshalling: ", err)
 	}
+  log.Println("Request Data: ", string(jsonData))
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
-	addHeaders(req, apiKey)
+	addHeaders(req, c.OpenAIApiKey)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
