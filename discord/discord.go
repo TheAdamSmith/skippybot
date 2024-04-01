@@ -18,7 +18,13 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
+type context struct {
+	channelID string
+}
+
 func RunDiscord(token string, client *openai.Client) {
+	var c *context
+	c = new(context)
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
 		log.Fatalln("Unabel to get discord client")
@@ -27,11 +33,13 @@ func RunDiscord(token string, client *openai.Client) {
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
 		messageCreate(s, m, client)
 	})
+
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if i.Type == discordgo.InteractionApplicationCommand {
-			handleSlashCommand(s, i, client)
+			handleSlashCommand(s, i, client, c)
 		}
 	})
+
 	fileCh := make(chan string)
 	filePath := "/mnt/c/Users/12asm/AppData/Roaming/bakkesmod/bakkesmod/data/RLStatSaver/2024/"
 	// filePath := "/mnt/c/Users/12asm/AppData/Roaming/bakkesmod/bakkesmod/data/RLStatSaver/2024/test.txt"
@@ -42,7 +50,11 @@ func RunDiscord(token string, client *openai.Client) {
 		for {
 			select {
 			case gameInfo := <-fileCh:
+				if c.channelID == "" {
+					continue
+				}
 				log.Println(gameInfo)
+				getAndSendResponse(dg, c.channelID, client, gameInfo)
 			}
 		}
 	}()
@@ -60,8 +72,8 @@ func RunDiscord(token string, client *openai.Client) {
 		Options: []*discordgo.ApplicationCommandOption{
 			{
 				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        "newthread",
-				Description: "Reset Skippy's thread",
+				Name:        "rl_sesh",
+				Description: "Start or Stop a rocket league session",
 				Required:    false,
 			},
 		},
@@ -80,25 +92,30 @@ func RunDiscord(token string, client *openai.Client) {
 	dg.Close()
 }
 
-func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, client *openai.Client) {
+func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, client *openai.Client, c *context) {
 	if i.ApplicationCommandData().Name != "skippy" {
 		return
 	}
 
-	// TODO: add flag handling
-	textOption := i.ApplicationCommandData().Options[0].StringValue()
-	if textOption == "newthread" {
+	// TODO: find specific command
+	// maybe add option to discord package?
+	textOption := i.ApplicationCommandData().Options[0].Value // rl_sesh
+	if textOption == "start" {
 		log.Println("Handling newthread command. Attempting to reset thread")
 		client.ThreadID = client.StartThread().ID
-	}
-	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Content: "Created new thread",
-		},
-	})
-	if err != nil {
-		log.Printf("Error responding to slash command: %s\n", err)
+
+		// TODO: use method
+		c.channelID = i.ChannelID
+
+		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "Started new session",
+			},
+		})
+		if err != nil {
+			log.Printf("Error responding to slash command: %s\n", err)
+		}
 	}
 }
 
@@ -120,15 +137,18 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate, client *ope
 		message += " " + removeQuery(attachment.URL)
 
 	}
-	s.ChannelTyping(m.ChannelID)
+	getAndSendResponse(s, m.ChannelID, client, message)
+}
+
+func getAndSendResponse(s *discordgo.Session, channelID string, client *openai.Client, message string) {
+	s.ChannelTyping(channelID)
 
 	log.Printf("Recieved message: %s\n", message)
 
 	log.Println("Attempting to get response...")
-	response := client.GetResponse(m.Content)
+	response := client.GetResponse(message)
 
-	s.ChannelMessageSend(m.ChannelID, response)
-
+	s.ChannelMessageSend(channelID, response)
 }
 
 func watchFolder(filePath string, ch chan<- string, interval time.Duration) {
@@ -181,6 +201,10 @@ func watchFile(filePath string, ch chan<- string, interval time.Duration) {
 	}
 }
 
+/*
+assumes using RL Stat saver https://bakkesplugins.com/plugins/view/390
+reads most recent game that is from the bottom up
+*/
 func getGameData(filePath string) string {
 	if filepath.Ext(filePath) != ".csv" {
 		log.Println("Attempted to read non csv file: ", filePath)
@@ -212,7 +236,8 @@ func getGameData(filePath string) string {
 		return ""
 	}
 
-	return toCsv(records[index:], 0, 10)
+	// only get last game and remove the unecessary cols
+	return toCsv(records[index:], 0, 8)
 }
 
 func toCsv(records [][]string, startCol int, endCol int) string {
@@ -240,7 +265,6 @@ func removeQuery(url string) string {
 }
 
 func downloadAttachment(url string, filename string) error {
-	// Get the data
 	resp, err := http.Get(url)
 	if err != nil {
 		return err
@@ -248,14 +272,12 @@ func downloadAttachment(url string, filename string) error {
 	defer resp.Body.Close()
 
 	log.Println("download successful attempting to write")
-	// Create the file
 	out, err := os.Create(filename)
 	if err != nil {
 		return err
 	}
 	defer out.Close()
 
-	// Write the body to file
 	_, err = io.Copy(out, resp.Body)
 	return err
 }

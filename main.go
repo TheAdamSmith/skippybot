@@ -16,7 +16,7 @@ const DEFAULT_INSTRUCTIONS = `Try to be as helpful as possible while keeping the
 
 const COMMENTATE_INSTRUCTIONS = `
     Messages will be sent in this thread that will contain the csv results of a rocket league game.
-    You analyze the results and provide commentary as Skippy the Magnificent.
+    Look at the results of each game and respond as if you were a commentator summarizing the game.
   `
 
 func main() {
