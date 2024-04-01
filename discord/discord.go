@@ -1,21 +1,23 @@
 package discord
 
 import (
+	"encoding/csv"
 	"fmt"
-  "net/http"
-  "io"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
-  // "math/rand"
+	"time"
+
+	openai "skippybot/openai"
 
 	"github.com/bwmarrin/discordgo"
-	openai "skippybot/openai"
 )
 
-// TODO: pass in startNewThread func
 func RunDiscord(token string, client *openai.Client) {
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
@@ -30,6 +32,22 @@ func RunDiscord(token string, client *openai.Client) {
 			handleSlashCommand(s, i, client)
 		}
 	})
+	fileCh := make(chan string)
+	filePath := "/mnt/c/Users/12asm/AppData/Roaming/bakkesmod/bakkesmod/data/RLStatSaver/2024/"
+	// filePath := "/mnt/c/Users/12asm/AppData/Roaming/bakkesmod/bakkesmod/data/RLStatSaver/2024/test.txt"
+	interval := 5 * time.Second
+	go watchFolder(filePath, fileCh, interval)
+
+	go func() {
+		for {
+			select {
+			case gameInfo := <-fileCh:
+				log.Println(gameInfo)
+			}
+		}
+	}()
+
+	defer close(fileCh)
 
 	err = dg.Open()
 	if err != nil {
@@ -96,12 +114,12 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate, client *ope
 		return
 	}
 	message := removeBotMention(m.Content, s.State.User.ID)
-  for _, attachment:= range m.Attachments{
-    log.Println("Attachment url: ", attachment.URL)
-    // downloadAttachment(attachment.URL, fmt.Sprint(rand.Int()) + ".jpg")    
-    message += " " + removeQuery(attachment.URL)
+	for _, attachment := range m.Attachments {
+		log.Println("Attachment url: ", attachment.URL)
+		// downloadAttachment(attachment.URL, fmt.Sprint(rand.Int()) + ".jpg")
+		message += " " + removeQuery(attachment.URL)
 
-  }
+	}
 	s.ChannelTyping(m.ChannelID)
 
 	log.Printf("Recieved message: %s\n", message)
@@ -113,38 +131,133 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate, client *ope
 
 }
 
+func watchFolder(filePath string, ch chan<- string, interval time.Duration) {
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		log.Println("Error reading folder:", err)
+		return
+	}
+
+	if !fileInfo.IsDir() {
+		watchFile(filePath, ch, interval)
+	}
+
+	dir, err := os.Open(filePath)
+	if err != nil {
+		log.Println("Could not epen directory: ", filePath, err)
+	}
+	files, err := dir.ReadDir(0)
+	for _, file := range files {
+		go watchFile(filePath+file.Name(), ch, interval)
+	}
+}
+
+func watchFile(filePath string, ch chan<- string, interval time.Duration) {
+	var lastModTime time.Time
+
+	for {
+		// Retrieve file info
+		fileInfo, err := os.Stat(filePath)
+		if err != nil {
+			log.Println("Error checking file:", err)
+			continue
+		}
+
+		modTime := fileInfo.ModTime()
+		if lastModTime == (time.Time{}) {
+			lastModTime = modTime
+		}
+		// Check if the modification time has changed
+		if modTime.After(lastModTime) {
+			log.Println("File has been modified at", modTime)
+			lastModTime = modTime
+			gameInfo := getGameData(filePath)
+			if gameInfo != "" {
+				ch <- gameInfo
+			}
+		}
+
+		time.Sleep(interval)
+	}
+}
+
+func getGameData(filePath string) string {
+	if filepath.Ext(filePath) != ".csv" {
+		log.Println("Attempted to read non csv file: ", filePath)
+		return ""
+	}
+	file, err := os.Open(filePath)
+	if err != nil {
+		log.Println("Error could not open file", filePath)
+	}
+	defer file.Close()
+
+	csvReader := csv.NewReader(file)
+
+	records, err := csvReader.ReadAll()
+	if err != nil {
+		log.Println("Could not read csv: ", filePath, err)
+	}
+
+	index := -1
+	for i := len(records) - 1; i >= 0; i-- {
+		if records[i][0] == "TEAM COLOR" {
+			index = i
+			break
+		}
+	}
+
+	if index == -1 {
+		log.Println("Could not find team data in csv: ", filePath)
+		return ""
+	}
+
+	return toCsv(records[index:], 0, 10)
+}
+
+func toCsv(records [][]string, startCol int, endCol int) string {
+	var retVal string
+	for _, record := range records {
+		for i := startCol; i < endCol; i++ {
+			retVal += record[i] + ","
+		}
+		retVal += "\n"
+	}
+	return retVal
+}
+
 func removeQuery(url string) string {
-    // Find the index of the first occurrence of "?"
-    index := strings.Index(url, "?")
-    
-    // If "?" is found, return the substring up to the "?"
-    if index != -1 {
-        return url[:index]
-    }
-    
-    // If "?" is not found, return the original URL
-    return url
+	// Find the index of the first occurrence of "?"
+	index := strings.Index(url, "?")
+
+	// If "?" is found, return the substring up to the "?"
+	if index != -1 {
+		return url[:index]
+	}
+
+	// If "?" is not found, return the original URL
+	return url
 }
 
 func downloadAttachment(url string, filename string) error {
-    // Get the data
-    resp, err := http.Get(url)
-    if err != nil {
-        return err
-    }
-    defer resp.Body.Close()
+	// Get the data
+	resp, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
 
-    log.Println("download successful attempting to write")
-    // Create the file
-    out, err := os.Create(filename)
-    if err != nil {
-        return err
-    }
-    defer out.Close()
+	log.Println("download successful attempting to write")
+	// Create the file
+	out, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
 
-    // Write the body to file
-    _, err = io.Copy(out, resp.Body)
-    return err
+	// Write the body to file
+	_, err = io.Copy(out, resp.Body)
+	return err
 }
 
 func removeBotMention(content string, botID string) string {
