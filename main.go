@@ -22,10 +22,12 @@ const COMMENTATE_INSTRUCTIONS = `
 func main() {
 	log.SetFlags(log.Ltime | log.Lshortfile)
 	log.Println("Initializing...")
+
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatalln("Unable to load env variables")
 	}
+
 	openAIKey := os.Getenv("OPEN_AI_KEY")
 	if openAIKey == "" {
 		log.Fatalln("Unable to get Open AI API Key")
@@ -39,10 +41,10 @@ func main() {
 
 	assistantId := "asst_YZ9utNnMlf1973bcH5ND7Tf1"
 	client := openai.NewClient(openAIKey, assistantId)
+
 	defer client.Close()
 
-	client.UpdateAdditionalInstructions(COMMENTATE_INSTRUCTIONS)
+	client.UpdateAdditionalInstructions(DEFAULT_INSTRUCTIONS)
 
 	discord.RunDiscord(token, client)
-
 }

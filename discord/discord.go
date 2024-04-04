@@ -22,6 +22,16 @@ type context struct {
 	channelID string
 }
 
+const COMMENTATE_INSTRUCTIONS = `
+    Messages will be sent in this thread that will contain the csv results of a rocket league game.
+    Look at the results of each game and respond as if you were a commentator summarizing the game.
+  `
+
+const DEFAULT_INSTRUCTIONS = `Try to be as helpful as possible while keeping the iconic skippy saracasm in your response.
+  Be nice and charming.
+  Use responses of varying lengths.
+`
+
 func RunDiscord(token string, client *openai.Client) {
 	var c *context
 	c = new(context)
@@ -41,8 +51,8 @@ func RunDiscord(token string, client *openai.Client) {
 	})
 
 	fileCh := make(chan string)
+	// wsl to windows file path
 	filePath := "/mnt/c/Users/12asm/AppData/Roaming/bakkesmod/bakkesmod/data/RLStatSaver/2024/"
-	// filePath := "/mnt/c/Users/12asm/AppData/Roaming/bakkesmod/bakkesmod/data/RLStatSaver/2024/test.txt"
 	interval := 5 * time.Second
 	go watchFolder(filePath, fileCh, interval)
 
@@ -106,11 +116,30 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, cl
 
 		// TODO: use method
 		c.channelID = i.ChannelID
-
+    client.UpdateAdditionalInstructions(COMMENTATE_INSTRUCTIONS)
 		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "Started new session",
+				Content: "Started rocket league session",
+			},
+		})
+		if err != nil {
+			log.Printf("Error responding to slash command: %s\n", err)
+		}
+	}
+
+	if textOption == "stop" {
+		log.Println("Handling newthread command. Attempting to reset thread")
+		client.ThreadID = client.StartThread().ID
+
+		// TODO: change
+		c.channelID = ""
+
+    client.UpdateAdditionalInstructions(DEFAULT_INSTRUCTIONS)
+		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "Stopped rocket league session",
 			},
 		})
 		if err != nil {
@@ -127,7 +156,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate, client *ope
 	log.Printf("Recieved Message: %s\n", m.Content)
 	log.Printf("Current User: %s\n", s.State.User.ID)
 	// Check if the bot is mentioned
-	if !isMentioned(m.Mentions, s.State.User.ID) {
+	if !isMentioned(m.Mentions, s.State.User.ID) && !strings.Contains(m.Author.Username, "njrage") {
 		return
 	}
 	message := removeBotMention(m.Content, s.State.User.ID)
@@ -223,8 +252,10 @@ func getGameData(filePath string) string {
 		log.Println("Could not read csv: ", filePath, err)
 	}
 
+	log.Println(records)
 	index := -1
 	for i := len(records) - 1; i >= 0; i-- {
+    log.Println(records[i])
 		if records[i][0] == "TEAM COLOR" {
 			index = i
 			break
