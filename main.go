@@ -34,12 +34,14 @@ func main() {
 	}
 
 	token := os.Getenv("DISCORD_TOKEN")
-
 	if token == "" {
 		log.Fatalln("could not read discord token")
 	}
 
-	assistantId := "asst_YZ9utNnMlf1973bcH5ND7Tf1"
+	assistantId := os.Getenv("ASSISTANT_ID")
+	if assistantId == "" {
+		log.Fatalln("could not read Assistant ID")
+	}
 	client := openai.NewClient(openAIKey, assistantId)
 
 	defer client.Close()

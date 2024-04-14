@@ -50,9 +50,14 @@ func RunDiscord(token string, client *openai.Client) {
 
 	fileCh := make(chan string)
 	// wsl to windows file path
-	filePath := "/mnt/c/Users/12asm/AppData/Roaming/bakkesmod/bakkesmod/data/RLStatSaver/2024/"
-	interval := 5 * time.Second
-	go WatchFolder(filePath, fileCh, interval)
+	filePath := os.Getenv("RL_DIR")
+	if filePath != "" {
+    log.Println(filePath)
+    interval := 5 * time.Second
+    go WatchFolder(filePath, fileCh, interval)
+	} else {
+		log.Println("Could not read rocket league folder")
+  }
 
 	go func() {
 		for {
