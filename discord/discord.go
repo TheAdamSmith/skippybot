@@ -1,14 +1,12 @@
 package discord
 
 import (
-	"encoding/csv"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -23,8 +21,8 @@ type context struct {
 }
 
 const COMMENTATE_INSTRUCTIONS = `
-    Messages will be sent in this thread that will contain the csv results of a rocket league game.
-    Look at the results of each game and respond as if you were a commentator summarizing the game.
+    Messages will be sent in this thread that will contain the json results of a rocket league game.
+    Announce the overall score and commentate on the performance of the home team. Come up with creative insults on their performance, but praise high performers
   `
 
 const DEFAULT_INSTRUCTIONS = `Try to be as helpful as possible while keeping the iconic skippy saracasm in your response.
@@ -54,7 +52,7 @@ func RunDiscord(token string, client *openai.Client) {
 	// wsl to windows file path
 	filePath := "/mnt/c/Users/12asm/AppData/Roaming/bakkesmod/bakkesmod/data/RLStatSaver/2024/"
 	interval := 5 * time.Second
-	go watchFolder(filePath, fileCh, interval)
+	go WatchFolder(filePath, fileCh, interval)
 
 	go func() {
 		for {
@@ -63,7 +61,6 @@ func RunDiscord(token string, client *openai.Client) {
 				if c.channelID == "" {
 					continue
 				}
-				log.Println(gameInfo)
 				getAndSendResponse(dg, c.channelID, client, gameInfo)
 			}
 		}
@@ -178,108 +175,6 @@ func getAndSendResponse(s *discordgo.Session, channelID string, client *openai.C
 	response := client.GetResponse(message)
 
 	s.ChannelMessageSend(channelID, response)
-}
-
-func watchFolder(filePath string, ch chan<- string, interval time.Duration) {
-	fileInfo, err := os.Stat(filePath)
-	if err != nil {
-		log.Println("Error reading folder:", err)
-		return
-	}
-
-	if !fileInfo.IsDir() {
-		watchFile(filePath, ch, interval)
-	}
-
-	dir, err := os.Open(filePath)
-	if err != nil {
-		log.Println("Could not epen directory: ", filePath, err)
-	}
-	files, err := dir.ReadDir(0)
-	for _, file := range files {
-		go watchFile(filePath+file.Name(), ch, interval)
-	}
-}
-
-func watchFile(filePath string, ch chan<- string, interval time.Duration) {
-	var lastModTime time.Time
-
-	for {
-		// Retrieve file info
-		fileInfo, err := os.Stat(filePath)
-		if err != nil {
-			log.Println("Error checking file:", err)
-			continue
-		}
-
-		modTime := fileInfo.ModTime()
-		if lastModTime == (time.Time{}) {
-			lastModTime = modTime
-		}
-		// Check if the modification time has changed
-		if modTime.After(lastModTime) {
-			log.Println("File has been modified at", modTime)
-			lastModTime = modTime
-			gameInfo := getGameData(filePath)
-			if gameInfo != "" {
-				ch <- gameInfo
-			}
-		}
-
-		time.Sleep(interval)
-	}
-}
-
-/*
-assumes using RL Stat saver https://bakkesplugins.com/plugins/view/390
-reads most recent game that is from the bottom up
-*/
-func getGameData(filePath string) string {
-	if filepath.Ext(filePath) != ".csv" {
-		log.Println("Attempted to read non csv file: ", filePath)
-		return ""
-	}
-	file, err := os.Open(filePath)
-	if err != nil {
-		log.Println("Error could not open file", filePath)
-	}
-	defer file.Close()
-
-	csvReader := csv.NewReader(file)
-
-	records, err := csvReader.ReadAll()
-	if err != nil {
-		log.Println("Could not read csv: ", filePath, err)
-	}
-
-	log.Println(records)
-	index := -1
-	for i := len(records) - 1; i >= 0; i-- {
-    log.Println(records[i])
-		if records[i][0] == "TEAM COLOR" {
-			index = i
-			break
-		}
-	}
-
-	if index == -1 {
-		log.Println("Could not find team data in csv: ", filePath)
-		return ""
-	}
-
-	// only get last game and remove the unecessary cols
-	return toCsv(records[index:], 0, 8)
-}
-
-func toCsv(records [][]string, startCol int, endCol int) string {
-	var retVal string
-	for _, record := range records {
-		for i := startCol; i < endCol; i++ {
-			retVal += record[i] + ","
-		}
-		retVal += "\n"
-	}
-	return retVal
 }
 
 func removeQuery(url string) string {
