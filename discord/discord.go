@@ -17,7 +17,15 @@ import (
 )
 
 type context struct {
-	channelID string
+	rlChannelID string
+	threadMap   map[string]chatThread
+}
+
+type chatThread struct {
+	openAIThread           openai.Thread
+	additionalInstructions string
+	// messages []string
+	// reponses []string
 }
 
 const COMMENTATE_INSTRUCTIONS = `
@@ -26,20 +34,21 @@ const COMMENTATE_INSTRUCTIONS = `
   `
 
 const DEFAULT_INSTRUCTIONS = `Try to be as helpful as possible while keeping the iconic skippy saracasm in your response.
-  Be nice and charming.
   Use responses of varying lengths.
 `
 
 func RunDiscord(token string, client *openai.Client) {
-	var c *context
-	c = new(context)
+	var c *context = &context {
+    threadMap: make(map[string]chatThread),
+  }
+
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
 		log.Fatalln("Unabel to get discord client")
 	}
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
-		messageCreate(s, m, client)
+		messageCreate(s, m, client, c)
 	})
 
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -49,24 +58,24 @@ func RunDiscord(token string, client *openai.Client) {
 	})
 
 	fileCh := make(chan string)
-	// wsl to windows file path
+
 	filePath := os.Getenv("RL_DIR")
 	if filePath != "" {
-    log.Println(filePath)
-    interval := 5 * time.Second
-    go WatchFolder(filePath, fileCh, interval)
+		log.Println(filePath)
+		interval := 5 * time.Second
+		go WatchFolder(filePath, fileCh, interval)
 	} else {
 		log.Println("Could not read rocket league folder")
-  }
+	}
 
 	go func() {
 		for {
 			select {
 			case gameInfo := <-fileCh:
-				if c.channelID == "" {
+				if c.rlChannelID == "" {
 					continue
 				}
-				getAndSendResponse(dg, c.channelID, client, gameInfo)
+				getAndSendResponse(dg, c.rlChannelID, gameInfo, client, c)
 			}
 		}
 	}()
@@ -113,12 +122,14 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, cl
 	// maybe add option to discord package?
 	textOption := i.ApplicationCommandData().Options[0].Value // rl_sesh
 	if textOption == "start" {
-		log.Println("Handling newthread command. Attempting to reset thread")
-		client.ThreadID = client.StartThread().ID
+		log.Println("Handling rl_sesh start command. creating new thread")
+		c.threadMap[i.ChannelID] = chatThread{
+			openAIThread:           client.StartThread(),
+			additionalInstructions: COMMENTATE_INSTRUCTIONS,
+		}
 
 		// TODO: use method
-		c.channelID = i.ChannelID
-    client.UpdateAdditionalInstructions(COMMENTATE_INSTRUCTIONS)
+		c.rlChannelID = i.ChannelID
 		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
@@ -132,12 +143,10 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, cl
 
 	if textOption == "stop" {
 		log.Println("Handling newthread command. Attempting to reset thread")
-		client.ThreadID = client.StartThread().ID
 
 		// TODO: change
-		c.channelID = ""
+		c.rlChannelID = ""
 
-    client.UpdateAdditionalInstructions(DEFAULT_INSTRUCTIONS)
 		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
@@ -150,34 +159,50 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, cl
 	}
 }
 
-func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate, client *openai.Client) {
+func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate, client *openai.Client, c *context) {
 	// Ignore all messages created by the bot itself
 	if m.Author.ID == s.State.User.ID {
 		return
 	}
 	log.Printf("Recieved Message: %s\n", m.Content)
 	log.Printf("Current User: %s\n", s.State.User.ID)
+
 	// Check if the bot is mentioned
 	if !isMentioned(m.Mentions, s.State.User.ID) && !strings.Contains(m.Author.Username, "njrage") {
 		return
 	}
 	message := removeBotMention(m.Content, s.State.User.ID)
+
+	thread, exists := c.threadMap[m.ChannelID]
+	if !exists {
+		thread = chatThread{
+			openAIThread:           client.StartThread(),
+			additionalInstructions: DEFAULT_INSTRUCTIONS,
+		}
+		c.threadMap[m.ChannelID] = thread
+	}
+
 	for _, attachment := range m.Attachments {
 		log.Println("Attachment url: ", attachment.URL)
 		// downloadAttachment(attachment.URL, fmt.Sprint(rand.Int()) + ".jpg")
 		message += " " + removeQuery(attachment.URL)
 
 	}
-	getAndSendResponse(s, m.ChannelID, client, message)
+	getAndSendResponse(s, m.ChannelID, message, client, c)
 }
 
-func getAndSendResponse(s *discordgo.Session, channelID string, client *openai.Client, message string) {
+func getAndSendResponse(
+	s *discordgo.Session,
+	channelID string,
+	message string,
+	client *openai.Client,
+	c *context) {
 	s.ChannelTyping(channelID)
 
 	log.Printf("Recieved message: %s\n", message)
 
 	log.Println("Attempting to get response...")
-	response := client.GetResponse(message)
+	response := client.GetResponse(message, c.threadMap[channelID].openAIThread.ID, c.threadMap[channelID].additionalInstructions)
 
 	s.ChannelMessageSend(channelID, response)
 }
@@ -224,6 +249,7 @@ func removeBotMention(content string, botID string) string {
 }
 
 func isMentioned(mentions []*discordgo.User, botId string) bool {
+	// TODO: USE USERNAME INSTEAD OF ID
 	for _, user := range mentions {
 		if user.ID == botId {
 			return true

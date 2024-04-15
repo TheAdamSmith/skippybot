@@ -13,60 +13,35 @@ import (
 type Client struct {
 	OpenAIApiKey  string
 	AssistantID   string
-	ThreadID      string
-  AdditionalInstructions string
-	Ticker        *time.Ticker
-	ThreadTimeout int
 }
 
 func NewClient(apiKey string, assistantID string) *Client {
-	return &Client{OpenAIApiKey: apiKey, AssistantID: assistantID, Ticker: time.NewTicker(30*time.Minute), ThreadTimeout: 30}
+	return &Client{OpenAIApiKey: apiKey, AssistantID: assistantID}
 }
 
-func (c *Client) UpdateAdditionalInstructions(instructions string) {
-  c.AdditionalInstructions = instructions
-}
-func (c *Client) Close() {
-  log.Println("Recieved close command. Stopping ticker")
-  c.Ticker.Stop()
-}
 
-func (c *Client) GetResponse(messageString string) string {
-	if c.ThreadID == "" {
-		log.Println("Tried to get response without thread set. Starting new thread")
-		c.ThreadID = c.StartThread().ID
-	}
-
-	go func() {
-		for range c.Ticker.C {
-			log.Println("Recieved tick. Starting new thread.")
-			c.ThreadID = c.StartThread().ID
-		}
-	}()
-
-	sendMessage(messageString, c.ThreadID, c.OpenAIApiKey)
-	initialRun := c.run()
+func (c *Client) GetResponse(messageString string, threadID string, additionalInstructions string) string {
+	sendMessage(messageString, threadID, c.OpenAIApiKey)
+	initialRun := c.run(threadID, additionalInstructions)
 	runId := initialRun.ID
 	log.Println("Initial Run id: ", initialRun.ID)
 	log.Println("Run status: ", initialRun.Status)
 	runStatus := ""
 	runDelay := 1
 	for runStatus != "completed" {
-		run := getRun(runId, c.ThreadID, c.OpenAIApiKey)
+		run := getRun(runId, threadID, c.OpenAIApiKey)
 		log.Printf("Run status: %s\n", run.Status)
 		runStatus = run.Status
 		time.Sleep(time.Duration(100*runDelay) * time.Millisecond)
 		runDelay++
 	}
-	messageList := listMessages(c.ThreadID, c.OpenAIApiKey)
-	log.Println("Recieived message from thread: ", c.ThreadID)
+	messageList := listMessages(threadID, c.OpenAIApiKey)
+	log.Println("Recieived message from thread: ", threadID)
 	log.Println(getFirstMessage(messageList))
 	return getFirstMessage(messageList)
 }
 
 func (c *Client) StartThread() Thread {
-	// reset ticker whenever we start a new thread
-	c.Ticker.Reset(time.Duration(c.ThreadTimeout) * time.Minute)
 	url := "https://api.openai.com/v1/threads"
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer([]byte("{}")))
@@ -88,7 +63,7 @@ func (c *Client) StartThread() Thread {
 	if err := json.Unmarshal(responseBody, &thread); err != nil {
 		log.Printf("Error unmarshalling thread:  %s\n", err)
 	}
-	log.Println("Successfully start thread: ", thread.ID)
+	log.Println("Successfully started thread: ", thread.ID)
 	return thread
 }
 
@@ -112,11 +87,10 @@ func (c *Client) ListAssistants() {
 	fmt.Println("Response:", string(responseBody))
 }
 
-func (c *Client) run() Run {
-	url := "https://api.openai.com/v1/threads/" + c.ThreadID + "/runs"
+func (c *Client) run(threadID string, additionalInstructions string) Run {
+	url := "https://api.openai.com/v1/threads/" + threadID + "/runs"
 
-  log.Println(" add instructions: " , c.AdditionalInstructions)
-	reqData := RunReq{AssistantId: c.AssistantID, Instructions: "", AdditionalInstructions: c.AdditionalInstructions}
+	reqData := RunReq{AssistantId: c.AssistantID, Instructions: "", AdditionalInstructions: additionalInstructions}
 	jsonData, err := json.Marshal(reqData)
 	if err != nil {
 		log.Println("Error Marshalling: ", err)
