@@ -38,9 +38,9 @@ const DEFAULT_INSTRUCTIONS = `Try to be as helpful as possible while keeping the
 `
 
 func RunDiscord(token string, client *openai.Client) {
-	var c *context = &context {
-    threadMap: make(map[string]chatThread),
-  }
+	var c *context = &context{
+		threadMap: make(map[string]chatThread),
+	}
 
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
@@ -165,10 +165,9 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate, client *ope
 		return
 	}
 	log.Printf("Recieved Message: %s\n", m.Content)
-	log.Printf("Current User: %s\n", s.State.User.ID)
 
 	// Check if the bot is mentioned
-	if !isMentioned(m.Mentions, s.State.User.ID) && !strings.Contains(m.Author.Username, "njrage") {
+	if !isMentioned(m.Mentions, s.State.User) {
 		return
 	}
 	message := removeBotMention(m.Content, s.State.User.ID)
@@ -248,10 +247,10 @@ func removeBotMention(content string, botID string) string {
 	return content
 }
 
-func isMentioned(mentions []*discordgo.User, botId string) bool {
-	// TODO: USE USERNAME INSTEAD OF ID
+func isMentioned(mentions []*discordgo.User, currUser *discordgo.User) bool {
 	for _, user := range mentions {
-		if user.ID == botId {
+		log.Printf("comparing %s to %s", user.Username, currUser.Username)
+		if user.Username == currUser.Username {
 			return true
 		}
 	}
