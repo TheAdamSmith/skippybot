@@ -11,14 +11,13 @@ import (
 )
 
 type Client struct {
-	OpenAIApiKey  string
-	AssistantID   string
+	OpenAIApiKey string
+	AssistantID  string
 }
 
 func NewClient(apiKey string, assistantID string) *Client {
 	return &Client{OpenAIApiKey: apiKey, AssistantID: assistantID}
 }
-
 
 func (c *Client) GetResponse(messageString string, threadID string, additionalInstructions string) string {
 	sendMessage(messageString, threadID, c.OpenAIApiKey)
@@ -95,7 +94,7 @@ func (c *Client) run(threadID string, additionalInstructions string) Run {
 	if err != nil {
 		log.Println("Error Marshalling: ", err)
 	}
-  log.Println("Request Data: ", string(jsonData))
+	log.Println("Request Data: ", string(jsonData))
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	addHeaders(req, c.OpenAIApiKey)
@@ -192,6 +191,11 @@ func listMessages(threadId string, apiKey string) MessageList {
 }
 
 func getFirstMessage(messageList MessageList) string {
+	if len(messageList.Data) <= 0 || messageList.FirstID == "" {
+		log.Println("Did not recieve any messages")
+		return ""
+
+	}
 	firstId := messageList.FirstID
 	for _, message := range messageList.Data {
 		if message.ID == firstId {
