@@ -1,6 +1,6 @@
 {
   "name": "send_channel_message",
-  "description": "Send a message in a channel with provided instructions",
+  "description": "Send an exciting, long message based on provided instructions. Add lots of Skippy's wit and sarcasm",
   "parameters": {
     "type": "object",
     "properties": {
@@ -8,13 +8,18 @@
         "type": "string",
         "description": "the id of the channel to send the message in"
       },
+      "timer_length": {
+        "type": "number",
+        "description": "timer length in seconds"
+      },
       "message": {
         "type": "string",
         "description": "The message to be sent full of Skippy's classic wit and lots of sarcasm"
       }
     },
     "required": [
-      "message"
+      "message",
+      "channel_id"
     ]
   }
 }
