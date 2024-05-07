@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+  "slices"
+
 
 	models "skippybot/models"
 	openai "skippybot/openai"
@@ -175,14 +177,19 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate, client *ope
 	if m.Author.ID == s.State.User.ID {
 		return
 	}
+
 	log.Printf("Recieved Message: %s\n", m.Content)
 
+  role, roleMentioned := isRoleMentioned(s, m)
 	// Check if the bot is mentioned
-	if !isMentioned(m.Mentions, s.State.User) {
+	if !(isMentioned(m.Mentions, s.State.User) || roleMentioned){
 		return
 	}
+
 	message := removeBotMention(m.Content, s.State.User.ID)
+	message = removeRoleMention(m.Content, role)
 	message = replaceChannelIDs(message, m.MentionChannels)
+  log.Println("using message: ", message)
 
 	thread, exists := c.threadMap[m.ChannelID]
 	if !exists {
@@ -259,12 +266,35 @@ func removeBotMention(content string, botID string) string {
 	content = strings.Replace(content, mentionPatternNick, "", -1)
 	return content
 }
+
+func removeRoleMention(content string, botID string) string {
+	mentionPattern := fmt.Sprintf("<@&%s>", botID)
+
+	content = strings.Replace(content, mentionPattern, "", -1)
+	return content
+}
+
 func replaceChannelIDs(content string, channels []*discordgo.Channel) string {
 	for _, channel := range channels {
 		mentionPattern := fmt.Sprintf("<#%s>", channel.ID)
 		content = strings.Replace(content, mentionPattern, "", -1)
 	}
 	return content
+}
+
+func isRoleMentioned( s *discordgo.Session, m *discordgo.MessageCreate) (string, bool) {
+
+  member, err := s.GuildMember(m.GuildID, s.State.User.ID);
+  if err != nil {
+    return "", false
+  }
+
+  for _, role := range m.MentionRoles {
+    if slices.Contains(member.Roles, role) {
+      return role, true
+    }
+  }
+  return "", false
 }
 
 func isMentioned(mentions []*discordgo.User, currUser *discordgo.User) bool {
