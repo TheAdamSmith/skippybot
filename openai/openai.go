@@ -4,40 +4,140 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"time"
+	models "skippybot/models"
+)
+
+const (
+	// run statuses TODO: group into struct
+	InProgress     string = "in_progress"
+	Queued         string = "queued"
+	Compeleted     string = "completed"
+	RequiresAction string = "requires_action"
+	// ai functions
+	GetStockPrice      string = "get_stock_price"
+	SendChannelMessage string = "send_channel_message"
+	SetReminder string = "set_reminder"
 )
 
 type Client struct {
 	OpenAIApiKey string
 	AssistantID  string
+  messageCH chan models.ChannelMessage
 }
 
 func NewClient(apiKey string, assistantID string) *Client {
 	return &Client{OpenAIApiKey: apiKey, AssistantID: assistantID}
 }
 
-func (c *Client) GetResponse(messageString string, threadID string, additionalInstructions string) string {
+func (c *Client) SetMessageCH(ch chan models.ChannelMessage) {
+  c.messageCH = ch
+}
+
+type StockFuncArgs struct {
+	Symbol string
+}
+
+func (c *Client) GetResponse(messageString string, dgChannID string,  threadID string, additionalInstructions string) string {
 	sendMessage(messageString, threadID, c.OpenAIApiKey)
 	initialRun := c.run(threadID, additionalInstructions)
 	runId := initialRun.ID
+
 	log.Println("Initial Run id: ", initialRun.ID)
 	log.Println("Run status: ", initialRun.Status)
-	runStatus := ""
+
 	runDelay := 1
-	for runStatus != "completed" {
+
+	for {
 		run := getRun(runId, threadID, c.OpenAIApiKey)
 		log.Printf("Run status: %s\n", run.Status)
-		runStatus = run.Status
+		if run.Status == Compeleted {
+			messageList := listMessages(threadID, c.OpenAIApiKey)
+			log.Println("Recieived message from thread: ", threadID)
+			log.Println(getFirstMessage(messageList))
+			return getFirstMessage(messageList)
+
+		}
+
+    channelMsg := models.ChannelMessage{}
+    
+		if run.Status == RequiresAction {
+			funcArgs := run.GetFunctionArgs()[0]
+			outputs := make(map[string]string)
+			for _, funcArg := range run.GetFunctionArgs() {
+				log.Println(funcArgs.FuncName)
+				log.Println(funcArgs.ToolID)
+        log.Println(funcArgs.JsonValue)
+				switch funcName := funcArg.FuncName; funcName {
+				case GetStockPrice:
+					log.Println("get_stock_price(): sending 150: ")
+					outputs[funcArg.ToolID] = "150"
+
+        case SetReminder: 
+					log.Println("set_reminder()")
+          channelMsg.ChannelID = dgChannID
+
+          fallthrough
+				case SendChannelMessage:
+					log.Println("send_channel_message()")
+
+          if c.messageCH == nil {
+            log.Println("no channel to send message on")
+            outputs[funcArgs.ToolID] = "cannot send message with a nil go channel"
+            continue
+          }
+
+					err := json.Unmarshal([]byte(funcArgs.JsonValue), &channelMsg)
+					if err != nil {
+						log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
+					  outputs[funcArg.ToolID] = "error deserializing data"
+					}
+
+          c.messageCH <- channelMsg
+
+					outputs[funcArg.ToolID] = "Great Success!!"
+
+				default:
+					outputs[funcArg.ToolID] = "error. Pretend like you had a problem with submind"
+				}
+			}
+			submitToolOutputs(outputs, threadID, runId, c.OpenAIApiKey)
+
+		}
 		time.Sleep(time.Duration(100*runDelay) * time.Millisecond)
 		runDelay++
 	}
-	messageList := listMessages(threadID, c.OpenAIApiKey)
-	log.Println("Recieived message from thread: ", threadID)
-	log.Println(getFirstMessage(messageList))
-	return getFirstMessage(messageList)
+}
+
+func submitToolOutputs(outputs map[string]string, threadID string, runID, apiKey string) {
+	url := "https://api.openai.com/v1/threads/" + threadID + "/runs/" + runID + "/submit_tool_outputs"
+
+	toolOutputs := []ToolOutput{}
+	for toolID, outputVal := range outputs {
+		toolOutputs = append(toolOutputs, ToolOutput{Output: outputVal, ToolCallID: toolID})
+	}
+
+	tooResponse := ToolResponse{ToolOutputs: toolOutputs}
+	jsonData, err := json.Marshal(tooResponse)
+	if err != nil {
+		fmt.Printf("Error Marshal %s\n", err)
+	}
+
+	log.Println(string(jsonData))
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	addHeaders(req, apiKey)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Println("POST error: ", err)
+	}
+
+	defer resp.Body.Close()
+  log.Println("submit_tool_outputs responded with: ", resp.Status)
 }
 
 func (c *Client) StartThread() Thread {
@@ -53,7 +153,7 @@ func (c *Client) StartThread() Thread {
 	}
 	defer resp.Body.Close()
 
-	responseBody, err := ioutil.ReadAll(resp.Body)
+	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Printf("Error reading resp %s\n", err)
 	}
@@ -78,7 +178,7 @@ func (c *Client) ListAssistants() {
 	}
 	defer resp.Body.Close()
 
-	responseBody, err := ioutil.ReadAll(resp.Body)
+	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Printf("Error reading resp %s", err)
 		return
@@ -106,7 +206,7 @@ func (c *Client) run(threadID string, additionalInstructions string) Run {
 	}
 	defer resp.Body.Close()
 
-	responseBody, err := ioutil.ReadAll(resp.Body)
+	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Println("Error reading resp: ", err)
 	}
@@ -152,7 +252,7 @@ func getRun(runId string, threadId string, apiKey string) Run {
 	}
 	defer resp.Body.Close()
 
-	responseBody, err := ioutil.ReadAll(resp.Body)
+	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Println("Error reading resp: ", err)
 	}
@@ -177,7 +277,7 @@ func listMessages(threadId string, apiKey string) MessageList {
 	}
 	defer resp.Body.Close()
 
-	responseBody, err := ioutil.ReadAll(resp.Body)
+	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Println("Error reading resp: ", err)
 	}

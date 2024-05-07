@@ -1,0 +1,21 @@
+{
+  "name": "set_reminder",
+  "description": "Send a message with a timer",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "timer_length": {
+        "type": "number",
+        "description": "timer length in seconds"
+      },
+      "message": {
+        "type": "string",
+        "description": "The message to be sent full of Skippy's classic wit and lots of sarcasm"
+      }
+    },
+    "required": [
+      "message",
+      "timer_length"
+    ]
+  }
+}

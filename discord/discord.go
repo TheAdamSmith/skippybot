@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	models "skippybot/models"
 	openai "skippybot/openai"
 
 	"github.com/bwmarrin/discordgo"
@@ -68,6 +69,10 @@ func RunDiscord(token string, client *openai.Client) {
 		log.Println("Could not read rocket league folder")
 	}
 
+	defer close(fileCh)
+
+	messageCh := make(chan models.ChannelMessage)
+	client.SetMessageCH(messageCh)
 	go func() {
 		for {
 			select {
@@ -76,15 +81,21 @@ func RunDiscord(token string, client *openai.Client) {
 					continue
 				}
 				getAndSendResponse(dg, c.rlChannelID, gameInfo, client, c)
+			case channelMsg := <-messageCh:
+				log.Println("Recieved channel message")
+				time.AfterFunc(time.Duration(channelMsg.TimerLength)*time.Second, func() {
+					log.Println("attempting to send message on: ", channelMsg.ChannelID)
+					dg.ChannelMessageSend(channelMsg.ChannelID, channelMsg.Message)
+				})
 			}
 		}
 	}()
 
-	defer close(fileCh)
+  defer close(messageCh)
 
 	err = dg.Open()
 	if err != nil {
-		log.Fatalln("Unabel to open discord client")
+		log.Fatalln("Unable to open discord client")
 	}
 
 	command := discordgo.ApplicationCommand{
@@ -171,6 +182,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate, client *ope
 		return
 	}
 	message := removeBotMention(m.Content, s.State.User.ID)
+	message = replaceChannelIDs(message, m.MentionChannels)
 
 	thread, exists := c.threadMap[m.ChannelID]
 	if !exists {
@@ -187,6 +199,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate, client *ope
 		message += " " + removeQuery(attachment.URL)
 
 	}
+	log.Println("CHANELLID: ", m.ChannelID)
 	getAndSendResponse(s, m.ChannelID, message, client, c)
 }
 
@@ -201,7 +214,7 @@ func getAndSendResponse(
 	log.Printf("Recieved message: %s\n", message)
 
 	log.Println("Attempting to get response...")
-	response := client.GetResponse(message, c.threadMap[channelID].openAIThread.ID, c.threadMap[channelID].additionalInstructions)
+	response := client.GetResponse(message, channelID, c.threadMap[channelID].openAIThread.ID, c.threadMap[channelID].additionalInstructions)
 
 	s.ChannelMessageSend(channelID, response)
 }
@@ -246,8 +259,16 @@ func removeBotMention(content string, botID string) string {
 	content = strings.Replace(content, mentionPatternNick, "", -1)
 	return content
 }
+func replaceChannelIDs(content string, channels []*discordgo.Channel) string {
+	for _, channel := range channels {
+		mentionPattern := fmt.Sprintf("<#%s>", channel.ID)
+		content = strings.Replace(content, mentionPattern, "", -1)
+	}
+	return content
+}
 
 func isMentioned(mentions []*discordgo.User, currUser *discordgo.User) bool {
+	log.Println("mentions length", len(mentions))
 	for _, user := range mentions {
 		log.Printf("comparing %s to %s", user.Username, currUser.Username)
 		if user.Username == currUser.Username {

@@ -1,0 +1,20 @@
+{
+  "name": "send_channel_message",
+  "description": "Send a message in a channel with provided instructions",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "channel_id": {
+        "type": "string",
+        "description": "the id of the channel to send the message in"
+      },
+      "message": {
+        "type": "string",
+        "description": "The message to be sent full of Skippy's classic wit and lots of sarcasm"
+      }
+    },
+    "required": [
+      "message"
+    ]
+  }
+}
