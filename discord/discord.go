@@ -177,7 +177,6 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate, client *ope
 	if m.Author.ID == s.State.User.ID {
 		return
 	}
-
 	log.Printf("Recieved Message: %s\n", m.Content)
 
   role, roleMentioned := isRoleMentioned(s, m)
@@ -187,8 +186,13 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate, client *ope
 	}
 
 	message := removeBotMention(m.Content, s.State.User.ID)
-	message = removeRoleMention(m.Content, role)
+	message = removeRoleMention(message, role)
 	message = replaceChannelIDs(message, m.MentionChannels)
+  message += "\n current time: " 
+
+  format := "Monday, Jan 02 at 03:04 PM"
+  message += time.Now().Format(format)
+
   log.Println("using message: ", message)
 
 	thread, exists := c.threadMap[m.ChannelID]
