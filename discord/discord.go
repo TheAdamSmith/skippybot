@@ -139,20 +139,27 @@ func waitForReminderResponse(
 	c *context,
 ) {
 
-	log.Println("waitFor")
-	ticker := time.NewTicker(time.Minute * 2)
+	maxRemind := 5
+	timeoutMin := 2 * time.Minute
+	timer := time.NewTimer(timeoutMin)
 
+	reminds := 0
 	for {
 
-		<-ticker.C
+		<-timer.C
 
 		// this value is reset on messageCreate
-		if !c.threadMap[channelID].awaitsResponse {
-			ticker.Stop()
+		if !c.threadMap[channelID].awaitsResponse || reminds == maxRemind {
+			timer.Stop()
 			return
 		}
 
+		reminds++
+		timeoutMin = timeoutMin * 2
+		timer.Reset(timeoutMin)
+
 		log.Println("sending another reminder")
+
 		message := "It looks they haven't responsed to this reminder can you generate a response nagging them about it. This is not a tool request."
 		getAndSendResponse(s, channelID, message, client, c)
 	}
