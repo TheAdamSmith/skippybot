@@ -7,11 +7,10 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
-  "slices"
-
 
 	models "skippybot/models"
 	openai "skippybot/openai"
@@ -21,12 +20,13 @@ import (
 
 type context struct {
 	rlChannelID string
-	threadMap   map[string]chatThread
+	threadMap   map[string]*chatThread
 }
 
 type chatThread struct {
 	openAIThread           openai.Thread
 	additionalInstructions string
+	awaitsResponse         bool
 	// messages []string
 	// reponses []string
 }
@@ -42,7 +42,7 @@ const DEFAULT_INSTRUCTIONS = `Try to be as helpful as possible while keeping the
 
 func RunDiscord(token string, client *openai.Client) {
 	var c *context = &context{
-		threadMap: make(map[string]chatThread),
+		threadMap: make(map[string]*chatThread),
 	}
 
 	dg, err := discordgo.New("Bot " + token)
@@ -84,16 +84,18 @@ func RunDiscord(token string, client *openai.Client) {
 				}
 				getAndSendResponse(dg, c.rlChannelID, gameInfo, client, c)
 			case channelMsg := <-messageCh:
-				log.Println("Recieved channel message")
+				log.Println("Recieved channel message. sending after desired timeout")
+				c.threadMap[channelMsg.ChannelID].awaitsResponse = true
 				time.AfterFunc(time.Duration(channelMsg.TimerLength)*time.Second, func() {
 					log.Println("attempting to send message on: ", channelMsg.ChannelID)
 					dg.ChannelMessageSend(channelMsg.ChannelID, channelMsg.Message)
+					go waitForReminderResponse(dg, channelMsg.ChannelID, client, c)
 				})
 			}
 		}
 	}()
 
-  defer close(messageCh)
+	defer close(messageCh)
 
 	err = dg.Open()
 	if err != nil {
@@ -126,6 +128,27 @@ func RunDiscord(token string, client *openai.Client) {
 	dg.Close()
 }
 
+func waitForReminderResponse(s *discordgo.Session, channelID string, client *openai.Client, c *context) {
+
+	log.Println("waitFor")
+	ticker := time.NewTicker(time.Second * 30)
+
+	for {
+
+		<-ticker.C
+
+		// this value is reset on messageCreate
+		if !c.threadMap[channelID].awaitsResponse {
+			ticker.Stop()
+			return
+		}
+
+		log.Println("sending another reminder")
+		message := "It looks they haven't responsed to this reminder can you generate a response nagging them about it. This is not a tool request."
+		getAndSendResponse(s, channelID, message, client, c)
+	}
+
+}
 func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, client *openai.Client, c *context) {
 	if i.ApplicationCommandData().Name != "skippy" {
 		return
@@ -136,7 +159,7 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, cl
 	textOption := i.ApplicationCommandData().Options[0].Value // rl_sesh
 	if textOption == "start" {
 		log.Println("Handling rl_sesh start command. creating new thread")
-		c.threadMap[i.ChannelID] = chatThread{
+		c.threadMap[i.ChannelID] = &chatThread{
 			openAIThread:           client.StartThread(),
 			additionalInstructions: COMMENTATE_INSTRUCTIONS,
 		}
@@ -179,29 +202,34 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate, client *ope
 	}
 	log.Printf("Recieved Message: %s\n", m.Content)
 
-  role, roleMentioned := isRoleMentioned(s, m)
+	_, exists := c.threadMap[m.ChannelID]
+
+	if exists {
+		// value used by reminders to see if it needs to send another message to user
+		c.threadMap[m.ChannelID].awaitsResponse = false
+	}
+
+	role, roleMentioned := isRoleMentioned(s, m)
 	// Check if the bot is mentioned
-	if !(isMentioned(m.Mentions, s.State.User) || roleMentioned){
+	if !(isMentioned(m.Mentions, s.State.User) || roleMentioned) {
 		return
 	}
 
 	message := removeBotMention(m.Content, s.State.User.ID)
 	message = removeRoleMention(message, role)
 	message = replaceChannelIDs(message, m.MentionChannels)
-  message += "\n current time: " 
+	message += "\n current time: "
 
-  format := "Monday, Jan 02 at 03:04 PM"
-  message += time.Now().Format(format)
+	format := "Monday, Jan 02 at 03:04 PM"
+	message += time.Now().Format(format)
 
-  log.Println("using message: ", message)
+	log.Println("using message: ", message)
 
-	thread, exists := c.threadMap[m.ChannelID]
 	if !exists {
-		thread = chatThread{
+		c.threadMap[m.ChannelID] = &chatThread{
 			openAIThread:           client.StartThread(),
 			additionalInstructions: DEFAULT_INSTRUCTIONS,
 		}
-		c.threadMap[m.ChannelID] = thread
 	}
 
 	for _, attachment := range m.Attachments {
@@ -286,19 +314,19 @@ func replaceChannelIDs(content string, channels []*discordgo.Channel) string {
 	return content
 }
 
-func isRoleMentioned( s *discordgo.Session, m *discordgo.MessageCreate) (string, bool) {
+func isRoleMentioned(s *discordgo.Session, m *discordgo.MessageCreate) (string, bool) {
 
-  member, err := s.GuildMember(m.GuildID, s.State.User.ID);
-  if err != nil {
-    return "", false
-  }
+	member, err := s.GuildMember(m.GuildID, s.State.User.ID)
+	if err != nil {
+		return "", false
+	}
 
-  for _, role := range m.MentionRoles {
-    if slices.Contains(member.Roles, role) {
-      return role, true
-    }
-  }
-  return "", false
+	for _, role := range m.MentionRoles {
+		if slices.Contains(member.Roles, role) {
+			return role, true
+		}
+	}
+	return "", false
 }
 
 func isMentioned(mentions []*discordgo.User, currUser *discordgo.User) bool {
