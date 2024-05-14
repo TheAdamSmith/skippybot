@@ -41,8 +41,15 @@ type StockFuncArgs struct {
 	Symbol string
 }
 
-func (c *Client) GetResponse(messageString string, dgChannID string, threadID string, additionalInstructions string) string {
+func (c *Client) GetResponse(
+	messageString string,
+	dgChannID string,
+	threadID string,
+	additionalInstructions string,
+) string {
+
 	sendMessage(messageString, threadID, c.OpenAIApiKey)
+
 	initialRun := c.run(threadID, additionalInstructions)
 	runId := initialRun.ID
 
@@ -54,6 +61,7 @@ func (c *Client) GetResponse(messageString string, dgChannID string, threadID st
 	for {
 		run := getRun(runId, threadID, c.OpenAIApiKey)
 		log.Printf("Run status: %s\n", run.Status)
+
 		if run.Status == Compeleted {
 			messageList := listMessages(threadID, c.OpenAIApiKey)
 			log.Println("Recieived message from thread: ", threadID)
@@ -67,11 +75,11 @@ func (c *Client) GetResponse(messageString string, dgChannID string, threadID st
 		if run.Status == RequiresAction {
 			funcArgs := run.GetFunctionArgs()[0]
 			outputs := make(map[string]string)
+
 			for _, funcArg := range run.GetFunctionArgs() {
-				log.Println(funcArgs.FuncName)
-				log.Println(funcArgs.ToolID)
-				log.Println(funcArgs.JsonValue)
+
 				switch funcName := funcArg.FuncName; funcName {
+
 				case GetStockPrice:
 					log.Println("get_stock_price(): sending 150: ")
 					outputs[funcArg.ToolID] = "150"
@@ -81,6 +89,7 @@ func (c *Client) GetResponse(messageString string, dgChannID string, threadID st
 					channelMsg.ChannelID = dgChannID
 
 					fallthrough
+
 				case SendChannelMessage:
 					log.Println("send_channel_message()")
 
@@ -189,7 +198,11 @@ func (c *Client) ListAssistants() {
 func (c *Client) run(threadID string, additionalInstructions string) Run {
 	url := "https://api.openai.com/v1/threads/" + threadID + "/runs"
 
-	reqData := RunReq{AssistantId: c.AssistantID, Instructions: "", AdditionalInstructions: additionalInstructions}
+	reqData := RunReq{
+		AssistantId:            c.AssistantID,
+		Instructions:           "",
+		AdditionalInstructions: additionalInstructions,
+	}
 	jsonData, err := json.Marshal(reqData)
 	if err != nil {
 		log.Println("Error Marshalling: ", err)
