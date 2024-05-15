@@ -251,6 +251,7 @@ func messageCreate(
 
 	format := "Monday, Jan 02 at 03:04 PM"
 	message += time.Now().Format(format)
+	message += "\n User ID: " + m.Author.Mention()
 
 	log.Println("using message: ", message)
 
