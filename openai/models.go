@@ -72,21 +72,22 @@ type Run struct {
 }
 
 type FuncArgs struct {
-  JsonValue string
-  FuncName string
-  ToolID string
+	JsonValue string
+	FuncName  string
+	ToolID    string
 }
+
 func (r Run) GetFunctionArgs() []FuncArgs {
-  toolCalls := r.RequiredAction.SubmitToolOutputs.ToolCalls
-  result := make([]FuncArgs, len(toolCalls))
-  for i, toolCall := range toolCalls {
-    result[i] = FuncArgs{
-      FuncName: toolCall.Function.Name, 
-      JsonValue: toolCall.Function.Arguments,
-      ToolID: toolCall.ID,
-    }
-  }
-  return result
+	toolCalls := r.RequiredAction.SubmitToolOutputs.ToolCalls
+	result := make([]FuncArgs, len(toolCalls))
+	for i, toolCall := range toolCalls {
+		result[i] = FuncArgs{
+			FuncName:  toolCall.Function.Name,
+			JsonValue: toolCall.Function.Arguments,
+			ToolID:    toolCall.ID,
+		}
+	}
+	return result
 }
 
 type Tool struct {
@@ -137,4 +138,3 @@ type ToolOutput struct {
 type ToolResponse struct {
 	ToolOutputs []ToolOutput `json:"tool_outputs"`
 }
-

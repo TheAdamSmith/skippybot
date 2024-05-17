@@ -72,7 +72,7 @@ func watchFile(filePath string, ch chan<- string, interval time.Duration) {
 
 		// Check if the modification time has changed
 		if modTime.After(lastModTime) {
-      log.Println("Detected file change: ", fileInfo.Name())
+			log.Println("Detected file change: ", fileInfo.Name())
 			lastModTime = modTime
 			gameInfo := getGameData(filePath)
 			if gameInfo != "" {
@@ -146,7 +146,7 @@ func toGame(records [][]string) Game {
 			homeTeamColor = records[i+1][0]
 			continue
 		}
-    
+
 		playerStats := PlayerStats{
 			Goals:   atoi(record[2]),
 			Assists: atoi(record[3]),

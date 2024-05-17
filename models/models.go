@@ -5,4 +5,5 @@ type ChannelMessage struct {
 	Message     string `json:"message"`
 	TimerLength int    `json:"timer_length,omitempty"`
 	ChannelID   string `json:"channel_id,omitempty"`
+	UserID      string `json:"user_id,omitempty"`
 }

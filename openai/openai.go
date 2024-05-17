@@ -7,8 +7,8 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"time"
 	models "skippybot/models"
+	"time"
 )
 
 const (
@@ -20,13 +20,13 @@ const (
 	// ai functions
 	GetStockPrice      string = "get_stock_price"
 	SendChannelMessage string = "send_channel_message"
-	SetReminder string = "set_reminder"
+	SetReminder        string = "set_reminder"
 )
 
 type Client struct {
 	OpenAIApiKey string
 	AssistantID  string
-  messageCH chan models.ChannelMessage
+	messageCH    chan models.ChannelMessage
 }
 
 func NewClient(apiKey string, assistantID string) *Client {
@@ -34,15 +34,22 @@ func NewClient(apiKey string, assistantID string) *Client {
 }
 
 func (c *Client) SetMessageCH(ch chan models.ChannelMessage) {
-  c.messageCH = ch
+	c.messageCH = ch
 }
 
 type StockFuncArgs struct {
 	Symbol string
 }
 
-func (c *Client) GetResponse(messageString string, dgChannID string,  threadID string, additionalInstructions string) string {
+func (c *Client) GetResponse(
+	messageString string,
+	dgChannID string,
+	threadID string,
+	additionalInstructions string,
+) string {
+
 	sendMessage(messageString, threadID, c.OpenAIApiKey)
+
 	initialRun := c.run(threadID, additionalInstructions)
 	runId := initialRun.ID
 
@@ -54,6 +61,7 @@ func (c *Client) GetResponse(messageString string, dgChannID string,  threadID s
 	for {
 		run := getRun(runId, threadID, c.OpenAIApiKey)
 		log.Printf("Run status: %s\n", run.Status)
+
 		if run.Status == Compeleted {
 			messageList := listMessages(threadID, c.OpenAIApiKey)
 			log.Println("Recieived message from thread: ", threadID)
@@ -62,41 +70,42 @@ func (c *Client) GetResponse(messageString string, dgChannID string,  threadID s
 
 		}
 
-    channelMsg := models.ChannelMessage{}
-    
+		channelMsg := models.ChannelMessage{}
+
 		if run.Status == RequiresAction {
 			funcArgs := run.GetFunctionArgs()[0]
 			outputs := make(map[string]string)
+
 			for _, funcArg := range run.GetFunctionArgs() {
-				log.Println(funcArgs.FuncName)
-				log.Println(funcArgs.ToolID)
-        log.Println(funcArgs.JsonValue)
+
 				switch funcName := funcArg.FuncName; funcName {
+
 				case GetStockPrice:
 					log.Println("get_stock_price(): sending 150: ")
 					outputs[funcArg.ToolID] = "150"
 
-        case SetReminder: 
+				case SetReminder:
 					log.Println("set_reminder()")
-          channelMsg.ChannelID = dgChannID
+					channelMsg.ChannelID = dgChannID
 
-          fallthrough
+					fallthrough
+
 				case SendChannelMessage:
 					log.Println("send_channel_message()")
 
-          if c.messageCH == nil {
-            log.Println("no channel to send message on")
-            outputs[funcArgs.ToolID] = "cannot send message with a nil go channel"
-            continue
-          }
+					if c.messageCH == nil {
+						log.Println("no channel to send message on")
+						outputs[funcArgs.ToolID] = "cannot send message with a nil go channel"
+						continue
+					}
 
 					err := json.Unmarshal([]byte(funcArgs.JsonValue), &channelMsg)
 					if err != nil {
 						log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
-					  outputs[funcArg.ToolID] = "error deserializing data"
+						outputs[funcArg.ToolID] = "error deserializing data"
 					}
 
-          c.messageCH <- channelMsg
+					c.messageCH <- channelMsg
 
 					outputs[funcArg.ToolID] = "Great Success!!"
 
@@ -137,7 +146,7 @@ func submitToolOutputs(outputs map[string]string, threadID string, runID, apiKey
 	}
 
 	defer resp.Body.Close()
-  log.Println("submit_tool_outputs responded with: ", resp.Status)
+	log.Println("submit_tool_outputs responded with: ", resp.Status)
 }
 
 func (c *Client) StartThread() Thread {
@@ -189,7 +198,11 @@ func (c *Client) ListAssistants() {
 func (c *Client) run(threadID string, additionalInstructions string) Run {
 	url := "https://api.openai.com/v1/threads/" + threadID + "/runs"
 
-	reqData := RunReq{AssistantId: c.AssistantID, Instructions: "", AdditionalInstructions: additionalInstructions}
+	reqData := RunReq{
+		AssistantId:            c.AssistantID,
+		Instructions:           "",
+		AdditionalInstructions: additionalInstructions,
+	}
 	jsonData, err := json.Marshal(reqData)
 	if err != nil {
 		log.Println("Error Marshalling: ", err)
@@ -308,5 +321,5 @@ func getFirstMessage(messageList MessageList) string {
 func addHeaders(req *http.Request, apiKey string) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("OpenAI-Beta", "assistants=v1")
+	req.Header.Set("OpenAI-Beta", "assistants=v2")
 }
