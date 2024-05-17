@@ -47,7 +47,12 @@ func RunDiscord(token string, client *openai.Client) {
 
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
-		log.Fatalln("Unabel to get discord client")
+		log.Fatalln("Unable to get discord client")
+	}
+
+	err = dg.Open()
+	if err != nil {
+		log.Fatalln("Unable to open discord client", err.Error())
 	}
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -86,25 +91,19 @@ func RunDiscord(token string, client *openai.Client) {
 			case channelMsg := <-messageCh:
 				log.Println("Recieved channel message. sending after desired timeout")
 
-				c.threadMap[channelMsg.ChannelID].awaitsResponse = true
-
 				time.AfterFunc(
 					time.Duration(channelMsg.TimerLength)*time.Second,
 					func() {
+						c.threadMap[channelMsg.ChannelID].awaitsResponse = true
 						log.Println("attempting to send message on: ", channelMsg.ChannelID)
 						dg.ChannelMessageSend(channelMsg.ChannelID, channelMsg.Message)
-						go waitForReminderResponse(dg, channelMsg.ChannelID, client, c)
+						go waitForReminderResponse(dg, channelMsg.ChannelID, channelMsg.UserID, client, c)
 					})
 			}
 		}
 	}()
 
 	defer close(messageCh)
-
-	err = dg.Open()
-	if err != nil {
-		log.Fatalln("Unable to open discord client")
-	}
 
 	command := discordgo.ApplicationCommand{
 		Name:        "skippy",
@@ -135,6 +134,7 @@ func RunDiscord(token string, client *openai.Client) {
 func waitForReminderResponse(
 	s *discordgo.Session,
 	channelID string,
+	userID string,
 	client *openai.Client,
 	c *context,
 ) {
@@ -160,7 +160,10 @@ func waitForReminderResponse(
 
 		log.Println("sending another reminder")
 
-		message := "It looks they haven't responsed to this reminder can you generate a response nagging them about it. This is not a tool request."
+		if userID == "" {
+			userID = "they"
+		}
+		message := "It looks " + userID + " haven't responsed to this reminder can you generate a response nagging them about it. This is not a tool request."
 		getAndSendResponse(s, channelID, message, client, c)
 	}
 
@@ -234,6 +237,9 @@ func messageCreate(
 	_, threadExists := c.threadMap[m.ChannelID]
 
 	if threadExists {
+		if c.threadMap[m.ChannelID].awaitsResponse {
+			getAndSendResponse(s, m.ChannelID, m.Content, client, c)
+		}
 		// value used by reminders to see if it needs to send another message to user
 		c.threadMap[m.ChannelID].awaitsResponse = false
 	}

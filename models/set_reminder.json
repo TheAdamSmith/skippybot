@@ -8,9 +8,13 @@
         "type": "number",
         "description": "timer length in seconds"
       },
+      "user_id": {
+        "type": "string",
+        "description": "id of the user that requested the reminder"
+      },
       "message": {
         "type": "string",
-        "description": "The message to be sent full of Skippy's classic wit and lots of sarcasm"
+        "description": "The message to be sent full of Skippy's classic wit and lots of sarcasm. Reference the user id as if it were a name in the message"
       }
     },
     "required": [
