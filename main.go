@@ -7,7 +7,8 @@ import (
 	"github.com/joho/godotenv"
 
 	discord "skippybot/discord"
-	openai "skippybot/openai"
+	// openai "skippybot/openai"
+	openai "github.com/sashabaranov/go-openai"
 )
 
 func main() {
@@ -29,11 +30,14 @@ func main() {
 		log.Fatalln("could not read discord token")
 	}
 
-	assistantId := os.Getenv("ASSISTANT_ID")
-	if assistantId == "" {
+	assistantID := os.Getenv("ASSISTANT_ID")
+	if assistantID == "" {
 		log.Fatalln("could not read Assistant ID")
 	}
-	client := openai.NewClient(openAIKey, assistantId)
 
-	discord.RunDiscord(token, client)
+	clientConfig := openai.DefaultConfig(openAIKey)
+	clientConfig.AssistantVersion = "v2"
+	client := openai.NewClientWithConfig(clientConfig)
+
+	discord.RunDiscord(token, client, assistantID)
 }

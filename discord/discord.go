@@ -1,6 +1,7 @@
 package discord
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -13,14 +14,18 @@ import (
 	"time"
 
 	models "skippybot/models"
-	openai "skippybot/openai"
+	openai2 "skippybot/openai"
+
+	openai "github.com/sashabaranov/go-openai"
 
 	"github.com/bwmarrin/discordgo"
 )
 
-type context struct {
+type State struct {
 	rlChannelID string
 	threadMap   map[string]*chatThread
+	assistantID string
+	messageCH   chan models.ChannelMessage
 }
 
 type chatThread struct {
@@ -40,9 +45,10 @@ const DEFAULT_INSTRUCTIONS = `Try to be as helpful as possible while keeping the
   Use responses of varying lengths.
 `
 
-func RunDiscord(token string, client *openai.Client) {
-	var c *context = &context{
-		threadMap: make(map[string]*chatThread),
+func RunDiscord(token string, client *openai.Client, assistantID string) {
+	var state *State = &State{
+		threadMap:   make(map[string]*chatThread),
+		assistantID: assistantID,
 	}
 
 	dg, err := discordgo.New("Bot " + token)
@@ -56,12 +62,12 @@ func RunDiscord(token string, client *openai.Client) {
 	}
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
-		messageCreate(s, m, client, c)
+		messageCreate(s, m, client, state)
 	})
 
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if i.Type == discordgo.InteractionApplicationCommand {
-			handleSlashCommand(s, i, client, c)
+			handleSlashCommand(s, i, client, state)
 		}
 	})
 
@@ -79,25 +85,32 @@ func RunDiscord(token string, client *openai.Client) {
 	defer close(fileCh)
 
 	messageCh := make(chan models.ChannelMessage)
-	client.SetMessageCH(messageCh)
+	state.messageCH = messageCh
 	go func() {
 		for {
 			select {
 			case gameInfo := <-fileCh:
-				if c.rlChannelID == "" {
+				if state.rlChannelID == "" {
 					continue
 				}
-				getAndSendResponse(dg, c.rlChannelID, gameInfo, client, c)
+				getAndSendResponse(dg, state.rlChannelID, gameInfo, client, state)
 			case channelMsg := <-messageCh:
 				log.Println("Recieved channel message. sending after desired timeout")
 
 				time.AfterFunc(
 					time.Duration(channelMsg.TimerLength)*time.Second,
 					func() {
-						c.threadMap[channelMsg.ChannelID].awaitsResponse = true
+						// TODO: fix unchecked map access
+						state.threadMap[channelMsg.ChannelID].awaitsResponse = true
 						log.Println("attempting to send message on: ", channelMsg.ChannelID)
 						dg.ChannelMessageSend(channelMsg.ChannelID, channelMsg.Message)
-						go waitForReminderResponse(dg, channelMsg.ChannelID, channelMsg.UserID, client, c)
+						go waitForReminderResponse(
+							dg,
+							channelMsg.ChannelID,
+							channelMsg.UserID,
+							client,
+							state,
+						)
 					})
 			}
 		}
@@ -136,7 +149,7 @@ func waitForReminderResponse(
 	channelID string,
 	userID string,
 	client *openai.Client,
-	c *context,
+	c *State,
 ) {
 
 	maxRemind := 5
@@ -173,7 +186,7 @@ func handleSlashCommand(
 	s *discordgo.Session,
 	i *discordgo.InteractionCreate,
 	client *openai.Client,
-	c *context,
+	state *State,
 ) {
 	if i.ApplicationCommandData().Name != "skippy" {
 		return
@@ -184,14 +197,30 @@ func handleSlashCommand(
 	textOption := i.ApplicationCommandData().Options[0].Value // rl_sesh
 	if textOption == "start" {
 		log.Println("Handling rl_sesh start command. creating new thread")
-		c.threadMap[i.ChannelID] = &chatThread{
-			openAIThread:           client.StartThread(),
+		thread, err := client.CreateThread(context.Background(), openai.ThreadRequest{})
+
+		if err != nil {
+			log.Println("Unable to create thread: ", err)
+			err = s.InteractionRespond(i.Interaction,
+				&discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Content: "Unable to start chat thread",
+					},
+				})
+			if err != nil {
+				log.Printf("Error responding to slash command: %s\n", err)
+			}
+			return
+		}
+		state.threadMap[i.ChannelID] = &chatThread{
+			openAIThread:           thread,
 			additionalInstructions: COMMENTATE_INSTRUCTIONS,
 		}
 
 		// TODO: use method
-		c.rlChannelID = i.ChannelID
-		err := s.InteractionRespond(i.Interaction,
+		state.rlChannelID = i.ChannelID
+		err = s.InteractionRespond(i.Interaction,
 			&discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
@@ -207,7 +236,7 @@ func handleSlashCommand(
 		log.Println("Handling newthread command. Attempting to reset thread")
 
 		// TODO: change
-		c.rlChannelID = ""
+		state.rlChannelID = ""
 
 		err := s.InteractionRespond(i.Interaction,
 			&discordgo.InteractionResponse{
@@ -226,7 +255,7 @@ func messageCreate(
 	s *discordgo.Session,
 	m *discordgo.MessageCreate,
 	client *openai.Client,
-	c *context,
+	c *State,
 ) {
 	// Ignore all messages created by the bot itself
 	if m.Author.ID == s.State.User.ID {
@@ -261,9 +290,15 @@ func messageCreate(
 
 	log.Println("using message: ", message)
 
+	thread, err := client.CreateThread(context.Background(), openai.ThreadRequest{})
+
+	if err != nil {
+		log.Println("Unable to create thread: ", err)
+	}
+
 	if !threadExists {
 		c.threadMap[m.ChannelID] = &chatThread{
-			openAIThread:           client.StartThread(),
+			openAIThread:           thread,
 			additionalInstructions: DEFAULT_INSTRUCTIONS,
 		}
 	}
@@ -283,17 +318,20 @@ func getAndSendResponse(
 	channelID string,
 	message string,
 	client *openai.Client,
-	c *context) {
+	state *State) {
 	s.ChannelTyping(channelID)
 
 	log.Printf("Recieved message: %s\n", message)
 
 	log.Println("Attempting to get response...")
-	response := client.GetResponse(
+	response := openai2.GetResponse(
 		message,
 		channelID,
-		c.threadMap[channelID].openAIThread.ID,
-		c.threadMap[channelID].additionalInstructions,
+		state.threadMap[channelID].openAIThread.ID,
+		state.assistantID,
+		state.messageCH,
+		client,
+		state.threadMap[channelID].additionalInstructions,
 	)
 
 	s.ChannelMessageSend(channelID, response)

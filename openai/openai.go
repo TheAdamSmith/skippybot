@@ -2,6 +2,7 @@ package openai
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,8 @@ import (
 	"net/http"
 	models "skippybot/models"
 	"time"
+
+	openai "github.com/sashabaranov/go-openai"
 )
 
 const (
@@ -41,29 +44,74 @@ type StockFuncArgs struct {
 	Symbol string
 }
 
-func (c *Client) GetResponse(
+func GetFunctionArgs(r openai.Run) []FuncArgs {
+	toolCalls := r.RequiredAction.SubmitToolOutputs.ToolCalls
+	result := make([]FuncArgs, len(toolCalls))
+	for i, toolCall := range toolCalls {
+		result[i] = FuncArgs{
+			FuncName:  toolCall.Function.Name,
+			JsonValue: toolCall.Function.Arguments,
+			ToolID:    toolCall.ID,
+		}
+	}
+	return result
+}
+
+func GetResponse(
 	messageString string,
 	dgChannID string,
 	threadID string,
+	assistantID string,
+	messageCH chan models.ChannelMessage,
+	client *openai.Client,
 	additionalInstructions string,
 ) string {
 
-	sendMessage(messageString, threadID, c.OpenAIApiKey)
+	mesgReq := openai.MessageRequest{
+		Role:    "user",
+		Content: messageString,
+	}
+	ctx := context.Background()
+	_, err := client.CreateMessage(ctx, threadID, mesgReq)
+	if err != nil {
+		log.Println("Unable to create message", err)
+	}
+	// sendMessage(messageString, threadID, c.OpenAIApiKey)
 
-	initialRun := c.run(threadID, additionalInstructions)
-	runId := initialRun.ID
+	runReq := openai.RunRequest{
+		AssistantID:            assistantID,
+		AdditionalInstructions: additionalInstructions,
+		Model:                  openai.GPT4o,
+	}
 
-	log.Println("Initial Run id: ", initialRun.ID)
-	log.Println("Run status: ", initialRun.Status)
+	run, err := client.CreateRun(ctx, threadID, runReq)
+	if err != nil {
+		log.Println("Unable to create run:", err)
+		return "Error getting response"
+	}
+
+	// initialRun := c.run(threadID, additionalInstructions)
+	runId := run.ID
+
+	log.Println("Initial Run id: ", run.ID)
+	log.Println("Run status: ", run.Status)
 
 	runDelay := 1
 
 	for {
-		run := getRun(runId, threadID, c.OpenAIApiKey)
+		run, err = client.RetrieveRun(ctx, run.ThreadID, run.ID)
+		if err != nil {
+			log.Println("error retrieving run: ", err)
+		}
+		// run := getRun(runId, threadID, c.OpenAIApiKey)
 		log.Printf("Run status: %s\n", run.Status)
 
-		if run.Status == Compeleted {
-			messageList := listMessages(threadID, c.OpenAIApiKey)
+		if run.Status == openai.RunStatusCompleted {
+			// messageList := listMessages(threadID, c.OpenAIApiKey)
+			messageList, err := client.ListMessage(ctx, threadID, nil, nil, nil, nil)
+			if err != nil {
+				log.Println("Unable to get messages: ", err)
+			}
 			log.Println("Recieived message from thread: ", threadID)
 			log.Println(getFirstMessage(messageList))
 			return getFirstMessage(messageList)
@@ -72,11 +120,10 @@ func (c *Client) GetResponse(
 
 		channelMsg := models.ChannelMessage{}
 
-		if run.Status == RequiresAction {
-			funcArgs := run.GetFunctionArgs()[0]
+		if run.Status == openai.RunStatusRequiresAction {
 			outputs := make(map[string]string)
 
-			for _, funcArg := range run.GetFunctionArgs() {
+			for _, funcArg := range GetFunctionArgs(run) {
 
 				switch funcName := funcArg.FuncName; funcName {
 
@@ -93,19 +140,19 @@ func (c *Client) GetResponse(
 				case SendChannelMessage:
 					log.Println("send_channel_message()")
 
-					if c.messageCH == nil {
+					if messageCH == nil {
 						log.Println("no channel to send message on")
-						outputs[funcArgs.ToolID] = "cannot send message with a nil go channel"
+						outputs[funcArg.ToolID] = "cannot send message with a nil go channel"
 						continue
 					}
 
-					err := json.Unmarshal([]byte(funcArgs.JsonValue), &channelMsg)
+					err := json.Unmarshal([]byte(funcArg.JsonValue), &channelMsg)
 					if err != nil {
 						log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
 						outputs[funcArg.ToolID] = "error deserializing data"
 					}
 
-					c.messageCH <- channelMsg
+					messageCH <- channelMsg
 
 					outputs[funcArg.ToolID] = "Great Success!!"
 
@@ -113,7 +160,11 @@ func (c *Client) GetResponse(
 					outputs[funcArg.ToolID] = "error. Pretend like you had a problem with submind"
 				}
 			}
-			submitToolOutputs(outputs, threadID, runId, c.OpenAIApiKey)
+			run, err = submitToolOutputs(client, outputs, threadID, runId)
+			if err != nil {
+				log.Println("Unable to submit tool outputs: ", err)
+				return ""
+			}
 
 		}
 		time.Sleep(time.Duration(100*runDelay) * time.Millisecond)
@@ -121,32 +172,20 @@ func (c *Client) GetResponse(
 	}
 }
 
-func submitToolOutputs(outputs map[string]string, threadID string, runID, apiKey string) {
-	url := "https://api.openai.com/v1/threads/" + threadID + "/runs/" + runID + "/submit_tool_outputs"
+func submitToolOutputs(
+	client *openai.Client,
+	outputs map[string]string,
+	threadID string,
+	runID string) (run openai.Run, err error) {
 
-	toolOutputs := []ToolOutput{}
+	toolOutputs := []openai.ToolOutput{}
 	for toolID, outputVal := range outputs {
-		toolOutputs = append(toolOutputs, ToolOutput{Output: outputVal, ToolCallID: toolID})
+		toolOutputs = append(toolOutputs, openai.ToolOutput{Output: outputVal, ToolCallID: toolID})
 	}
-
-	tooResponse := ToolResponse{ToolOutputs: toolOutputs}
-	jsonData, err := json.Marshal(tooResponse)
-	if err != nil {
-		fmt.Printf("Error Marshal %s\n", err)
+	req := openai.SubmitToolOutputsRequest{
+		ToolOutputs: toolOutputs,
 	}
-
-	log.Println(string(jsonData))
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
-	addHeaders(req, apiKey)
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Println("POST error: ", err)
-	}
-
-	defer resp.Body.Close()
-	log.Println("submit_tool_outputs responded with: ", resp.Status)
+	return client.SubmitToolOutputs(context.Background(), threadID, runID, req)
 }
 
 func (c *Client) StartThread() Thread {
@@ -303,15 +342,15 @@ func listMessages(threadId string, apiKey string) MessageList {
 	return messageList
 }
 
-func getFirstMessage(messageList MessageList) string {
-	if len(messageList.Data) <= 0 || messageList.FirstID == "" {
+func getFirstMessage(messageList openai.MessagesList) string {
+	if len(messageList.Messages) <= 0 || messageList.FirstID == nil {
 		log.Println("Did not recieve any messages")
 		return ""
 
 	}
 	firstId := messageList.FirstID
-	for _, message := range messageList.Data {
-		if message.ID == firstId {
+	for _, message := range messageList.Messages {
+		if message.ID == *firstId {
 			return message.Content[0].Text.Value
 		}
 	}
