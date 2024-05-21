@@ -13,8 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	models "skippybot/models"
-
 	openai "github.com/sashabaranov/go-openai"
 
 	"github.com/bwmarrin/discordgo"
@@ -24,7 +22,7 @@ type State struct {
 	rlChannelID string
 	threadMap   map[string]*chatThread
 	assistantID string
-	messageCH   chan models.ChannelMessage
+	messageCH   chan ChannelMessage
 }
 
 type chatThread struct {
@@ -33,6 +31,15 @@ type chatThread struct {
 	awaitsResponse         bool
 	// messages []string
 	// reponses []string
+}
+
+// used for sending a message on a specific discord channel
+type ChannelMessage struct {
+	Message     string `json:"message"`
+	TimerLength int    `json:"timer_length,omitempty"`
+	ChannelID   string `json:"channel_id,omitempty"`
+	UserID      string `json:"user_id,omitempty"`
+	IsReminder  bool   `json:"is_reminder,omitempty"`
 }
 
 const COMMENTATE_INSTRUCTIONS = `
@@ -83,7 +90,7 @@ func RunDiscord(token string, client *openai.Client, assistantID string) {
 
 	defer close(fileCh)
 
-	messageCh := make(chan models.ChannelMessage)
+	messageCh := make(chan ChannelMessage)
 	state.messageCH = messageCh
 	go func() {
 		for {
@@ -99,17 +106,20 @@ func RunDiscord(token string, client *openai.Client, assistantID string) {
 				time.AfterFunc(
 					time.Duration(channelMsg.TimerLength)*time.Second,
 					func() {
-						// TODO: fix unchecked map access
-						state.threadMap[channelMsg.ChannelID].awaitsResponse = true
+
 						log.Println("attempting to send message on: ", channelMsg.ChannelID)
 						dg.ChannelMessageSend(channelMsg.ChannelID, channelMsg.Message)
-						go waitForReminderResponse(
-							dg,
-							channelMsg.ChannelID,
-							channelMsg.UserID,
-							client,
-							state,
-						)
+						if channelMsg.IsReminder {
+							state.threadMap[channelMsg.ChannelID].awaitsResponse = true
+							go waitForReminderResponse(
+								dg,
+								channelMsg.ChannelID,
+								channelMsg.UserID,
+								client,
+								state,
+							)
+
+						}
 					})
 			}
 		}
