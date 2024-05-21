@@ -333,15 +333,23 @@ func getAndSendResponse(
 	log.Printf("Recieved message: %s\n", message)
 
 	log.Println("Attempting to get response...")
-	response := GetResponse(
+
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, DGChannelID, channelID)
+	ctx = context.WithValue(ctx, ThreadID, state.threadMap[channelID].openAIThread.ID)
+	ctx = context.WithValue(ctx, AssistantID, state.assistantID)
+
+	response, err := GetResponse(
+		ctx,
 		message,
-		channelID,
-		state.threadMap[channelID].openAIThread.ID,
-		state.assistantID,
 		state.messageCH,
 		client,
 		state.threadMap[channelID].additionalInstructions,
 	)
+	if err != nil {
+		log.Println("Unable to get response: ", err)
+		response = "Oh no! Something went wrong."
+	}
 
 	s.ChannelMessageSend(channelID, response)
 }

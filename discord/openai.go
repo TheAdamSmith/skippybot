@@ -3,8 +3,9 @@ package discord
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
-	models "skippybot/models"
 	"time"
 
 	openai "github.com/sashabaranov/go-openai"
@@ -28,20 +29,33 @@ type FuncArgs struct {
 }
 
 func GetResponse(
+	ctx context.Context,
 	messageString string,
-	dgChannID string,
-	threadID string,
-	assistantID string,
-	messageCH chan models.ChannelMessage,
+	messageCH chan ChannelMessage,
 	client *openai.Client,
 	additionalInstructions string,
-) string {
+) (string, error) {
 
 	mesgReq := openai.MessageRequest{
 		Role:    "user",
 		Content: messageString,
 	}
-	ctx := context.Background()
+
+	threadID, ok := ctx.Value(ThreadID).(string)
+	if !ok {
+		return "", errors.New(fmt.Sprintf("Could not find context value: %s", string(ThreadID)))
+	}
+
+	dgChannID, ok := ctx.Value(DGChannelID).(string)
+	if !ok {
+		return "", errors.New(fmt.Sprintf("Could not find context value: %s", string(DGChannelID)))
+	}
+
+	assistantID, ok := ctx.Value(AssistantID).(string)
+	if !ok {
+		return "", errors.New(fmt.Sprintf("Could not find context value: %s", string(DGChannelID)))
+	}
+
 	_, err := client.CreateMessage(ctx, threadID, mesgReq)
 	if err != nil {
 		log.Println("Unable to create message", err)
@@ -56,7 +70,7 @@ func GetResponse(
 	run, err := client.CreateRun(ctx, threadID, runReq)
 	if err != nil {
 		log.Println("Unable to create run:", err)
-		return "Error getting response"
+		return "", err
 	}
 
 	runId := run.ID
@@ -78,16 +92,20 @@ func GetResponse(
 
 			messageList, err := client.ListMessage(ctx, threadID, nil, nil, nil, nil)
 			if err != nil {
-				log.Println("Unable to get messages: ", err)
+				return "", fmt.Errorf("Unable to get messages: ", err)
 			}
+
 			log.Println("Recieived message from thread: ", threadID)
-			message := getFirstMessage(messageList)
-			log.Println("Received response: ", message)
-			return message
+			message, err := getFirstMessage(messageList)
+			if err != nil {
+				return "", fmt.Errorf("Unable to get first message: ", err)
+			}
+			log.Println("Received response from ai: ", message)
+			return message, nil
 
 		}
 
-		channelMsg := models.ChannelMessage{}
+		channelMsg := ChannelMessage{}
 
 		if run.Status == openai.RunStatusRequiresAction {
 
@@ -106,7 +124,7 @@ func GetResponse(
 				case SetReminder:
 					log.Println("set_reminder()")
 					channelMsg.ChannelID = dgChannID
-
+					channelMsg.IsReminder = true
 					fallthrough
 
 				case SendChannelMessage:
@@ -141,8 +159,7 @@ func GetResponse(
 			}
 			run, err = submitToolOutputs(client, toolOutputs, threadID, runId)
 			if err != nil {
-				log.Println("Unable to submit tool outputs: ", err)
-				return ""
+				return "", fmt.Errorf("Unable to submit tool outputs: %s", err)
 			}
 
 		}
@@ -177,17 +194,16 @@ func GetFunctionArgs(r openai.Run) []FuncArgs {
 	return result
 }
 
-func getFirstMessage(messageList openai.MessagesList) string {
+func getFirstMessage(messageList openai.MessagesList) (string, error) {
 	if len(messageList.Messages) <= 0 || messageList.FirstID == nil {
-		log.Println("Did not recieve any messages")
-		return ""
+		return "", errors.New("recieved zero length message list")
 
 	}
 	firstId := messageList.FirstID
 	for _, message := range messageList.Messages {
 		if message.ID == *firstId {
-			return message.Content[0].Text.Value
+			return message.Content[0].Text.Value, nil
 		}
 	}
-	return ""
+	return "", fmt.Errorf("could not find message with id: %s", *firstId)
 }
