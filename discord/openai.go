@@ -27,7 +27,6 @@ type FuncArgs struct {
 	ToolID    string
 }
 
-
 func GetResponse(
 	messageString string,
 	dgChannID string,
@@ -60,7 +59,6 @@ func GetResponse(
 		return "Error getting response"
 	}
 
-	// initialRun := c.run(threadID, additionalInstructions)
 	runId := run.ID
 
 	log.Println("Initial Run id: ", run.ID)
@@ -92,15 +90,18 @@ func GetResponse(
 		channelMsg := models.ChannelMessage{}
 
 		if run.Status == openai.RunStatusRequiresAction {
-			outputs := make(map[string]string)
 
-			for _, funcArg := range GetFunctionArgs(run) {
+			funcArgs := GetFunctionArgs(run)
+			outputs := make(map[string]string)
+			toolOutputs := make([]openai.ToolOutput, len(funcArgs))
+
+			for i, funcArg := range funcArgs {
 
 				switch funcName := funcArg.FuncName; funcName {
 
 				case GetStockPrice:
 					log.Println("get_stock_price(): sending 150: ")
-					outputs[funcArg.ToolID] = "150"
+					toolOutputs[i] = openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: "150"}
 
 				case SetReminder:
 					log.Println("set_reminder()")
@@ -113,7 +114,10 @@ func GetResponse(
 
 					if messageCH == nil {
 						log.Println("no channel to send message on")
-						outputs[funcArg.ToolID] = "cannot send message with a nil go channel"
+						toolOutputs[i] = openai.ToolOutput{
+							ToolCallID: funcArg.ToolID,
+							Output:     "cannot send message with a nil go channel",
+						}
 						continue
 					}
 
@@ -125,13 +129,17 @@ func GetResponse(
 
 					messageCH <- channelMsg
 
+					toolOutputs[i] = openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: "worked"}
 					outputs[funcArg.ToolID] = "Great Success!!"
 
 				default:
-					outputs[funcArg.ToolID] = "error. Pretend like you had a problem with submind"
+					toolOutputs[i] = openai.ToolOutput{
+						ToolCallID: funcArg.ToolID,
+						Output:     "error. Pretend like you had a problem with submind",
+					}
 				}
 			}
-			run, err = submitToolOutputs(client, outputs, threadID, runId)
+			run, err = submitToolOutputs(client, toolOutputs, threadID, runId)
 			if err != nil {
 				log.Println("Unable to submit tool outputs: ", err)
 				return ""
@@ -146,14 +154,10 @@ func GetResponse(
 // TODO: construct tool ouput struct during looping
 func submitToolOutputs(
 	client *openai.Client,
-	outputs map[string]string,
+	toolOutputs []openai.ToolOutput,
 	threadID string,
 	runID string) (run openai.Run, err error) {
 
-	toolOutputs := []openai.ToolOutput{}
-	for toolID, outputVal := range outputs {
-		toolOutputs = append(toolOutputs, openai.ToolOutput{Output: outputVal, ToolCallID: toolID})
-	}
 	req := openai.SubmitToolOutputsRequest{
 		ToolOutputs: toolOutputs,
 	}
