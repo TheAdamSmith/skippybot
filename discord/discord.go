@@ -14,7 +14,6 @@ import (
 	"time"
 
 	models "skippybot/models"
-	openai2 "skippybot/openai"
 
 	openai "github.com/sashabaranov/go-openai"
 
@@ -255,7 +254,7 @@ func messageCreate(
 	s *discordgo.Session,
 	m *discordgo.MessageCreate,
 	client *openai.Client,
-	c *State,
+	state *State,
 ) {
 	// Ignore all messages created by the bot itself
 	if m.Author.ID == s.State.User.ID {
@@ -263,14 +262,14 @@ func messageCreate(
 	}
 	log.Printf("Recieved Message: %s\n", m.Content)
 
-	_, threadExists := c.threadMap[m.ChannelID]
+	_, threadExists := state.threadMap[m.ChannelID]
 
 	if threadExists {
-		if c.threadMap[m.ChannelID].awaitsResponse {
-			getAndSendResponse(s, m.ChannelID, m.Content, client, c)
+		if state.threadMap[m.ChannelID].awaitsResponse {
+			getAndSendResponse(s, m.ChannelID, m.Content, client, state)
 		}
 		// value used by reminders to see if it needs to send another message to user
-		c.threadMap[m.ChannelID].awaitsResponse = false
+		state.threadMap[m.ChannelID].awaitsResponse = false
 	}
 
 	role, roleMentioned := isRoleMentioned(s, m)
@@ -297,7 +296,7 @@ func messageCreate(
 	}
 
 	if !threadExists {
-		c.threadMap[m.ChannelID] = &chatThread{
+		state.threadMap[m.ChannelID] = &chatThread{
 			openAIThread:           thread,
 			additionalInstructions: DEFAULT_INSTRUCTIONS,
 		}
@@ -310,7 +309,7 @@ func messageCreate(
 
 	}
 	log.Println("CHANELLID: ", m.ChannelID)
-	getAndSendResponse(s, m.ChannelID, message, client, c)
+	getAndSendResponse(s, m.ChannelID, message, client, state)
 }
 
 func getAndSendResponse(
@@ -324,7 +323,7 @@ func getAndSendResponse(
 	log.Printf("Recieved message: %s\n", message)
 
 	log.Println("Attempting to get response...")
-	response := openai2.GetResponse(
+	response := GetResponse(
 		message,
 		channelID,
 		state.threadMap[channelID].openAIThread.ID,
@@ -409,9 +408,7 @@ func isRoleMentioned(s *discordgo.Session, m *discordgo.MessageCreate) (string, 
 }
 
 func isMentioned(mentions []*discordgo.User, currUser *discordgo.User) bool {
-	log.Println("mentions length", len(mentions))
 	for _, user := range mentions {
-		log.Printf("comparing %s to %s", user.Username, currUser.Username)
 		if user.Username == currUser.Username {
 			return true
 		}

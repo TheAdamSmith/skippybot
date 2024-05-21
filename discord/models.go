@@ -1,4 +1,4 @@
-package openai
+package discord
 
 type Thread struct {
 	ID        string            `json:"id"`
