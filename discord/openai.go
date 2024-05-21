@@ -21,18 +21,12 @@ type StockFuncArgs struct {
 	Symbol string
 }
 
-func GetFunctionArgs(r openai.Run) []FuncArgs {
-	toolCalls := r.RequiredAction.SubmitToolOutputs.ToolCalls
-	result := make([]FuncArgs, len(toolCalls))
-	for i, toolCall := range toolCalls {
-		result[i] = FuncArgs{
-			FuncName:  toolCall.Function.Name,
-			JsonValue: toolCall.Function.Arguments,
-			ToolID:    toolCall.ID,
-		}
-	}
-	return result
+type FuncArgs struct {
+	JsonValue string
+	FuncName  string
+	ToolID    string
 }
+
 
 func GetResponse(
 	messageString string,
@@ -164,6 +158,19 @@ func submitToolOutputs(
 		ToolOutputs: toolOutputs,
 	}
 	return client.SubmitToolOutputs(context.Background(), threadID, runID, req)
+}
+
+func GetFunctionArgs(r openai.Run) []FuncArgs {
+	toolCalls := r.RequiredAction.SubmitToolOutputs.ToolCalls
+	result := make([]FuncArgs, len(toolCalls))
+	for i, toolCall := range toolCalls {
+		result[i] = FuncArgs{
+			FuncName:  toolCall.Function.Name,
+			JsonValue: toolCall.Function.Arguments,
+			ToolID:    toolCall.ID,
+		}
+	}
+	return result
 }
 
 func getFirstMessage(messageList openai.MessagesList) string {

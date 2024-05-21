@@ -7,7 +7,7 @@ import (
 	"github.com/joho/godotenv"
 
 	discord "skippybot/discord"
-	// openai "skippybot/openai"
+
 	openai "github.com/sashabaranov/go-openai"
 )
 
