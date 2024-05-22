@@ -16,10 +16,15 @@ const (
 	GetStockPrice      string = "get_stock_price"
 	SendChannelMessage string = "send_channel_message"
 	SetReminder        string = "set_reminder"
+	GenerateImage      string = "generate_image"
 )
 
 type StockFuncArgs struct {
 	Symbol string
+}
+
+type GenerateImageFuncArgs struct {
+	Prompt string `json:"prompt"`
 }
 
 type FuncArgs struct {
@@ -105,6 +110,7 @@ func GetResponse(
 
 		}
 
+		// TODO: this used across multiple function could cause issues
 		channelMsg := ChannelMessage{}
 
 		if run.Status == openai.RunStatusRequiresAction {
@@ -120,6 +126,34 @@ func GetResponse(
 				case GetStockPrice:
 					log.Println("get_stock_price(): sending 150: ")
 					toolOutputs[i] = openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: "150"}
+				case GenerateImage:
+					generateImageFuncArgs := GenerateImageFuncArgs{}
+					err := json.Unmarshal([]byte(funcArg.JsonValue), &generateImageFuncArgs)
+					if err != nil {
+						log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
+						toolOutputs[i] = openai.ToolOutput{
+							ToolCallID: funcArg.ToolID,
+							Output:     "error deserializing data",
+						}
+						continue
+					}
+
+					imgUrl, err := GetImgUrl(generateImageFuncArgs.Prompt, client)
+					if err != nil {
+						log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
+						toolOutputs[i] = openai.ToolOutput{
+							ToolCallID: funcArg.ToolID,
+							Output:     "error getting image data",
+						}
+						continue
+					}
+					channelMsg.ChannelID = dgChannID
+					channelMsg.Message = imgUrl
+					messageCH <- channelMsg
+					toolOutputs[i] = openai.ToolOutput{
+						ToolCallID: funcArg.ToolID,
+						Output:     "worked",
+					}
 
 				case SetReminder:
 					log.Println("set_reminder()")
