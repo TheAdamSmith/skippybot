@@ -19,7 +19,6 @@ import (
 )
 
 type State struct {
-	rlChannelID string
 	threadMap   map[string]*chatThread
 	assistantID string
 	messageCH   chan ChannelMessage
@@ -29,6 +28,7 @@ type chatThread struct {
 	openAIThread           openai.Thread
 	additionalInstructions string
 	awaitsResponse         bool
+	cancelFunc             context.CancelFunc
 	// messages []string
 	// reponses []string
 }
@@ -77,29 +77,11 @@ func RunDiscord(token string, client *openai.Client, assistantID string) {
 		}
 	})
 
-	fileCh := make(chan string)
-
-	filePath := os.Getenv("RL_DIR")
-	if filePath != "" {
-		log.Println(filePath)
-		interval := 5 * time.Second
-		go WatchFolder(filePath, fileCh, interval)
-	} else {
-		log.Println("Could not read rocket league folder")
-	}
-
-	defer close(fileCh)
-
 	messageCh := make(chan ChannelMessage)
 	state.messageCH = messageCh
 	go func() {
 		for {
 			select {
-			case gameInfo := <-fileCh:
-				if state.rlChannelID == "" {
-					continue
-				}
-				getAndSendResponse(dg, state.rlChannelID, gameInfo, client, state)
 			case channelMsg := <-messageCh:
 				log.Println("Recieved channel message. sending after desired timeout")
 
@@ -185,14 +167,22 @@ func waitForReminderResponse(
 		if userID == "" {
 			userID = "they"
 		}
-		message := "It looks " + userID + " haven't responsed to this reminder can you generate a response nagging them about it. This is not a tool request."
+
+		message := fmt.Sprintf(
+			"It looks %s haven't responsed to this reminder can you generate a response nagging them about it. This is not a tool request.",
+			mention(userID),
+		)
 		getAndSendResponse(s, channelID, message, client, c)
 	}
 
 }
 
+func mention(userID string) string {
+	return fmt.Sprint("<@%s>", userID)
+}
+
 func handleSlashCommand(
-	s *discordgo.Session,
+	dg *discordgo.Session,
 	i *discordgo.InteractionCreate,
 	client *openai.Client,
 	state *State,
@@ -206,11 +196,11 @@ func handleSlashCommand(
 	textOption := i.ApplicationCommandData().Options[0].Value // rl_sesh
 	if textOption == "start" {
 		log.Println("Handling rl_sesh start command. creating new thread")
-		thread, err := client.CreateThread(context.Background(), openai.ThreadRequest{})
 
+		thread, err := client.CreateThread(context.Background(), openai.ThreadRequest{})
 		if err != nil {
 			log.Println("Unable to create thread: ", err)
-			err = s.InteractionRespond(i.Interaction,
+			err = dg.InteractionRespond(i.Interaction,
 				&discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
@@ -222,18 +212,25 @@ func handleSlashCommand(
 			}
 			return
 		}
+
+		ctx, cancelFunc := context.WithCancel(context.Background())
 		state.threadMap[i.ChannelID] = &chatThread{
 			openAIThread:           thread,
 			additionalInstructions: COMMENTATE_INSTRUCTIONS,
+			cancelFunc:             cancelFunc,
 		}
 
-		// TODO: use method
-		state.rlChannelID = i.ChannelID
-		err = s.InteractionRespond(i.Interaction,
+		message := "Started rocket league session"
+		filePath := os.Getenv("RL_DIR")
+		err = StartRocketLeagueSession(ctx, filePath, i.ChannelID, dg, state, client)
+		if err != nil {
+			message = "unable to start rocket leage session"
+		}
+		err = dg.InteractionRespond(i.Interaction,
 			&discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
-					Content: "Started rocket league session",
+					Content: message,
 				},
 			})
 		if err != nil {
@@ -242,16 +239,21 @@ func handleSlashCommand(
 	}
 
 	if textOption == "stop" {
-		log.Println("Handling newthread command. Attempting to reset thread")
 
-		// TODO: change
-		state.rlChannelID = ""
+		var message string
+		cancelFunc := state.threadMap[i.ChannelID].cancelFunc
+		if cancelFunc == nil {
+			message = "Unable to stop session no cancel function"
+		} else {
+			cancelFunc()
+			message = "Stopped rocket league session"
+		}
 
-		err := s.InteractionRespond(i.Interaction,
+		err := dg.InteractionRespond(i.Interaction,
 			&discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
-					Content: "Stopped rocket league session",
+					Content: message,
 				},
 			})
 		if err != nil {
