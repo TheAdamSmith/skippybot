@@ -55,7 +55,7 @@ func StartRocketLeagueSession(
 		go WatchFolder(filePath, fileCh, interval)
 	} else {
 		log.Println("Could not read rocket league folder")
-		return errors.New("Receieved empty file path")
+		return errors.New("receieved empty file path")
 	}
 
 	go func() {
@@ -89,6 +89,10 @@ func WatchFolder(filePath string, ch chan<- string, interval time.Duration) {
 		log.Println("Could not epen directory: ", filePath, err)
 	}
 	files, err := dir.ReadDir(0)
+	if err != nil {
+		log.Println("Unable to read dir")
+		return
+	}
 	for _, file := range files {
 		go watchFile(filePath+file.Name(), ch, interval)
 	}
@@ -207,6 +211,7 @@ func toGame(records [][]string) Game {
 	return game
 }
 
+//lint:ignore U1000 saving for later
 func toCsv(records [][]string, startCol int, endCol int) string {
 	var retVal string
 	for _, record := range records {
