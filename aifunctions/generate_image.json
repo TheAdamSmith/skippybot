@@ -1,0 +1,16 @@
+{
+  "name": "generate_image",
+  "description": "call a function to generate and image using dall-e",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "the prompt provided by the user"
+      }
+    },
+    "required": [
+      "prompt"
+    ]
+  }
+}

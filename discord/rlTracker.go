@@ -1,14 +1,19 @@
 package discord
 
 import (
+	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"log"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/bwmarrin/discordgo"
+	"github.com/sashabaranov/go-openai"
 )
 
 // PlayerStats represents the statistics for a single player.
@@ -32,6 +37,42 @@ type Game struct {
 	AwayTeam  map[string]PlayerStats `json:"away_team"`
 }
 
+func StartRocketLeagueSession(
+	ctx context.Context,
+	filePath string,
+	channelID string,
+	dg *discordgo.Session,
+	state *State,
+	client *openai.Client,
+) error {
+
+	fileCh := make(chan string)
+	defer close(fileCh)
+
+	if filePath != "" {
+		log.Println("Starting rocket league session watching : ", filePath)
+		interval := 5 * time.Second
+		go WatchFolder(filePath, fileCh, interval)
+	} else {
+		log.Println("Could not read rocket league folder")
+		return errors.New("Receieved empty file path")
+	}
+
+	go func() {
+		for {
+			select {
+			case gameInfo := <-fileCh:
+				getAndSendResponse(dg, channelID, gameInfo, client, state)
+			case <-ctx.Done():
+				log.Println("Received cancel command")
+				return
+			}
+		}
+	}()
+
+	return nil
+
+}
 func WatchFolder(filePath string, ch chan<- string, interval time.Duration) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
