@@ -18,7 +18,7 @@ func GetImgUrl(prompt string, client *openai.Client) (string, error) {
 
 	resp, err := client.CreateImage(context.Background(), imgReq)
 	if err != nil {
-		return "", fmt.Errorf("Unable to get image url: ", err)
+		return "", fmt.Errorf("unable to get image url: %s", err)
 	}
 
 	return resp.Data[0].URL, nil

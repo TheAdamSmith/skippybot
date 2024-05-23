@@ -8,6 +8,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
 	openai "github.com/sashabaranov/go-openai"
 )
 
@@ -35,8 +36,9 @@ type FuncArgs struct {
 
 func GetResponse(
 	ctx context.Context,
+	dg *discordgo.Session,
 	messageString string,
-	messageCH chan ChannelMessage,
+	state *State,
 	client *openai.Client,
 	additionalInstructions string,
 ) (string, error) {
@@ -48,17 +50,17 @@ func GetResponse(
 
 	threadID, ok := ctx.Value(ThreadID).(string)
 	if !ok {
-		return "", errors.New(fmt.Sprintf("Could not find context value: %s", string(ThreadID)))
+		return "", fmt.Errorf("could not find context value: %s", string(ThreadID))
 	}
 
 	dgChannID, ok := ctx.Value(DGChannelID).(string)
 	if !ok {
-		return "", errors.New(fmt.Sprintf("Could not find context value: %s", string(DGChannelID)))
+		return "", fmt.Errorf("could not find context value: %s", string(DGChannelID))
 	}
 
 	assistantID, ok := ctx.Value(AssistantID).(string)
 	if !ok {
-		return "", errors.New(fmt.Sprintf("Could not find context value: %s", string(DGChannelID)))
+		return "", fmt.Errorf("could not find context value: %s", string(DGChannelID))
 	}
 
 	_, err := client.CreateMessage(ctx, threadID, mesgReq)
@@ -78,8 +80,6 @@ func GetResponse(
 		return "", err
 	}
 
-	runId := run.ID
-
 	log.Println("Initial Run id: ", run.ID)
 	log.Println("Run status: ", run.Status)
 
@@ -97,112 +97,136 @@ func GetResponse(
 
 			messageList, err := client.ListMessage(ctx, threadID, nil, nil, nil, nil)
 			if err != nil {
-				return "", fmt.Errorf("Unable to get messages: ", err)
+				return "", fmt.Errorf("unable to get messages: %s", err)
 			}
 
 			log.Println("Recieived message from thread: ", threadID)
 			message, err := getFirstMessage(messageList)
 			if err != nil {
-				return "", fmt.Errorf("Unable to get first message: ", err)
+				return "", fmt.Errorf("unable to get first message: %s", err)
 			}
 			log.Println("Received response from ai: ", message)
 			return message, nil
 
 		}
 
-		// TODO: this used across multiple function could cause issues
-		channelMsg := ChannelMessage{}
-
 		if run.Status == openai.RunStatusRequiresAction {
-
-			funcArgs := GetFunctionArgs(run)
-			outputs := make(map[string]string)
-			toolOutputs := make([]openai.ToolOutput, len(funcArgs))
-
-			for i, funcArg := range funcArgs {
-
-				switch funcName := funcArg.FuncName; funcName {
-
-				case GetStockPrice:
-					log.Println("get_stock_price(): sending 150: ")
-					toolOutputs[i] = openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: "150"}
-				case GenerateImage:
-					generateImageFuncArgs := GenerateImageFuncArgs{}
-					err := json.Unmarshal([]byte(funcArg.JsonValue), &generateImageFuncArgs)
-					if err != nil {
-						log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
-						toolOutputs[i] = openai.ToolOutput{
-							ToolCallID: funcArg.ToolID,
-							Output:     "error deserializing data",
-						}
-						continue
-					}
-
-					imgUrl, err := GetImgUrl(generateImageFuncArgs.Prompt, client)
-					if err != nil {
-						log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
-						toolOutputs[i] = openai.ToolOutput{
-							ToolCallID: funcArg.ToolID,
-							Output:     "error getting image data",
-						}
-						continue
-					}
-					channelMsg.ChannelID = dgChannID
-					channelMsg.Message = imgUrl
-					messageCH <- channelMsg
-					toolOutputs[i] = openai.ToolOutput{
-						ToolCallID: funcArg.ToolID,
-						Output:     "worked",
-					}
-
-				case SetReminder:
-					log.Println("set_reminder()")
-					channelMsg.ChannelID = dgChannID
-					channelMsg.IsReminder = true
-					fallthrough
-
-				case SendChannelMessage:
-					log.Println("send_channel_message()")
-
-					if messageCH == nil {
-						log.Println("no channel to send message on")
-						toolOutputs[i] = openai.ToolOutput{
-							ToolCallID: funcArg.ToolID,
-							Output:     "cannot send message with a nil go channel",
-						}
-						continue
-					}
-
-					err := json.Unmarshal([]byte(funcArg.JsonValue), &channelMsg)
-					if err != nil {
-						log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
-						outputs[funcArg.ToolID] = "error deserializing data"
-					}
-
-					messageCH <- channelMsg
-
-					toolOutputs[i] = openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: "worked"}
-					outputs[funcArg.ToolID] = "Great Success!!"
-
-				default:
-					toolOutputs[i] = openai.ToolOutput{
-						ToolCallID: funcArg.ToolID,
-						Output:     "error. Pretend like you had a problem with submind",
-					}
-				}
-			}
-			run, err = submitToolOutputs(client, toolOutputs, threadID, runId)
-			if err != nil {
-				return "", fmt.Errorf("Unable to submit tool outputs: %s", err)
-			}
-
+			handleRequiresAction(dg, run, dgChannID, threadID, state, client)
 		}
+
 		time.Sleep(time.Duration(100*runDelay) * time.Millisecond)
 		runDelay++
 	}
 }
 
-// TODO: construct tool ouput struct during looping
+func handleRequiresAction(
+	dg *discordgo.Session,
+	run openai.Run,
+	dgChannID string,
+	threadID string,
+	state *State,
+	client *openai.Client,
+) (openai.Run, error) {
+
+	// TODO: this used across multiple function could cause issues
+	channelMsg := ChannelMessage{}
+
+	funcArgs := GetFunctionArgs(run)
+	outputs := make(map[string]string)
+	toolOutputs := make([]openai.ToolOutput, len(funcArgs))
+
+	sendChannelMessage := func() {
+		log.Println("attempting to send message on: ", channelMsg.ChannelID)
+		dg.ChannelMessageSend(channelMsg.ChannelID, channelMsg.Message)
+		if channelMsg.IsReminder {
+			state.threadMap[channelMsg.ChannelID].awaitsResponse = true
+			go waitForReminderResponse(
+				dg,
+				channelMsg.ChannelID,
+				channelMsg.UserID,
+				client,
+				state,
+			)
+
+		}
+	}
+
+	for i, funcArg := range funcArgs {
+
+		switch funcName := funcArg.FuncName; funcName {
+
+		case GetStockPrice:
+			log.Println("get_stock_price(): sending 150: ")
+			toolOutputs[i] = openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: "150"}
+		case GenerateImage:
+			generateImageFuncArgs := GenerateImageFuncArgs{}
+			err := json.Unmarshal([]byte(funcArg.JsonValue), &generateImageFuncArgs)
+			if err != nil {
+				log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
+				toolOutputs[i] = openai.ToolOutput{
+					ToolCallID: funcArg.ToolID,
+					Output:     "error deserializing data",
+				}
+				continue
+			}
+
+			imgUrl, err := GetImgUrl(generateImageFuncArgs.Prompt, client)
+			if err != nil {
+				log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
+				toolOutputs[i] = openai.ToolOutput{
+					ToolCallID: funcArg.ToolID,
+					Output:     "error getting image data",
+				}
+				continue
+			}
+			channelMsg.ChannelID = dgChannID
+			channelMsg.Message = imgUrl
+			// messageCH <- channelMsg
+			log.Println("Recieved channel message. sending after desired timeout")
+
+			time.AfterFunc(
+				time.Duration(channelMsg.TimerLength)*time.Second,
+				sendChannelMessage,
+			)
+			toolOutputs[i] = openai.ToolOutput{
+				ToolCallID: funcArg.ToolID,
+				Output:     "worked",
+			}
+
+		case SetReminder:
+			log.Println("set_reminder()")
+			channelMsg.ChannelID = dgChannID
+			channelMsg.IsReminder = true
+			fallthrough
+
+		case SendChannelMessage:
+			log.Println("send_channel_message()")
+
+			err := json.Unmarshal([]byte(funcArg.JsonValue), &channelMsg)
+			if err != nil {
+				log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
+				outputs[funcArg.ToolID] = "error deserializing data"
+			}
+
+			time.AfterFunc(
+				time.Duration(channelMsg.TimerLength)*time.Second,
+				sendChannelMessage,
+			)
+
+			toolOutputs[i] = openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: "worked"}
+			outputs[funcArg.ToolID] = "Great Success!!"
+
+		default:
+			toolOutputs[i] = openai.ToolOutput{
+				ToolCallID: funcArg.ToolID,
+				Output:     "error. Pretend like you had a problem with submind",
+			}
+		}
+	}
+	return submitToolOutputs(client, toolOutputs, threadID, run.ID)
+
+}
+
 func submitToolOutputs(
 	client *openai.Client,
 	toolOutputs []openai.ToolOutput,

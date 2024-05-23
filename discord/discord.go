@@ -21,7 +21,6 @@ import (
 type State struct {
 	threadMap   map[string]*chatThread
 	assistantID string
-	messageCH   chan ChannelMessage
 }
 
 type chatThread struct {
@@ -77,38 +76,6 @@ func RunDiscord(token string, client *openai.Client, assistantID string) {
 		}
 	})
 
-	messageCh := make(chan ChannelMessage)
-	state.messageCH = messageCh
-	go func() {
-		for {
-			select {
-			case channelMsg := <-messageCh:
-				log.Println("Recieved channel message. sending after desired timeout")
-
-				time.AfterFunc(
-					time.Duration(channelMsg.TimerLength)*time.Second,
-					func() {
-
-						log.Println("attempting to send message on: ", channelMsg.ChannelID)
-						dg.ChannelMessageSend(channelMsg.ChannelID, channelMsg.Message)
-						if channelMsg.IsReminder {
-							state.threadMap[channelMsg.ChannelID].awaitsResponse = true
-							go waitForReminderResponse(
-								dg,
-								channelMsg.ChannelID,
-								channelMsg.UserID,
-								client,
-								state,
-							)
-
-						}
-					})
-			}
-		}
-	}()
-
-	defer close(messageCh)
-
 	command := discordgo.ApplicationCommand{
 		Name:        "skippy",
 		Description: "Control Skippy the Magnificent",
@@ -129,7 +96,7 @@ func RunDiscord(token string, client *openai.Client, assistantID string) {
 
 	log.Println("Bot is now running. Press CTRL+C to exit.")
 	sc := make(chan os.Signal, 1)
-	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
+	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, syscall.SIGTERM)
 	<-sc
 
 	dg.Close()
@@ -325,12 +292,12 @@ func messageCreate(
 }
 
 func getAndSendResponse(
-	s *discordgo.Session,
+	dg *discordgo.Session,
 	channelID string,
 	message string,
 	client *openai.Client,
 	state *State) {
-	s.ChannelTyping(channelID)
+	dg.ChannelTyping(channelID)
 
 	log.Printf("Recieved message: %s\n", message)
 
@@ -343,8 +310,9 @@ func getAndSendResponse(
 
 	response, err := GetResponse(
 		ctx,
+		dg,
 		message,
-		state.messageCH,
+		state,
 		client,
 		state.threadMap[channelID].additionalInstructions,
 	)
@@ -353,7 +321,7 @@ func getAndSendResponse(
 		response = "Oh no! Something went wrong."
 	}
 
-	s.ChannelMessageSend(channelID, response)
+	dg.ChannelMessageSend(channelID, response)
 }
 
 func removeQuery(url string) string {
@@ -369,6 +337,7 @@ func removeQuery(url string) string {
 	return url
 }
 
+//lint:ignore U1000 saving for later
 func downloadAttachment(url string, filename string) error {
 	resp, err := http.Get(url)
 	if err != nil {
