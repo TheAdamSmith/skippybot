@@ -14,11 +14,18 @@ import (
 
 const (
 	// ai functions
-	GetStockPrice      string = "get_stock_price"
-	SendChannelMessage string = "send_channel_message"
-	SetReminder        string = "set_reminder"
-	GenerateImage      string = "generate_image"
+	GetStockPrice        string = "get_stock_price"
+	SendChannelMessage   string = "send_channel_message"
+	SetReminder          string = "set_reminder"
+	GenerateImage        string = "generate_image"
+	ToggleMorningMessage string = "toggle_morning_message"
 )
+
+type FuncArgs struct {
+	JsonValue string
+	FuncName  string
+	ToolID    string
+}
 
 type StockFuncArgs struct {
 	Symbol string
@@ -28,25 +35,19 @@ type GenerateImageFuncArgs struct {
 	Prompt string `json:"prompt"`
 }
 
-type FuncArgs struct {
-	JsonValue string
-	FuncName  string
-	ToolID    string
+type MorningMsgFuncArgs struct {
+	Enable bool   `json:"enable"`
+	Time   string `json:"time"`
 }
 
 func GetResponse(
 	ctx context.Context,
 	dg *discordgo.Session,
-	messageString string,
+	messageReq openai.MessageRequest,
 	state *State,
 	client *openai.Client,
 	additionalInstructions string,
 ) (string, error) {
-
-	mesgReq := openai.MessageRequest{
-		Role:    "user",
-		Content: messageString,
-	}
 
 	threadID, ok := ctx.Value(ThreadID).(string)
 	if !ok {
@@ -63,7 +64,12 @@ func GetResponse(
 		return "", fmt.Errorf("could not find context value: %s", string(DGChannelID))
 	}
 
-	_, err := client.CreateMessage(ctx, threadID, mesgReq)
+	disableFunctions, ok := ctx.Value(DisableFunctions).(bool)
+	if !ok {
+		disableFunctions = false
+	}
+
+	_, err := client.CreateMessage(ctx, threadID, messageReq)
 	if err != nil {
 		log.Println("Unable to create message", err)
 	}
@@ -74,6 +80,11 @@ func GetResponse(
 		Model:                  openai.GPT4o,
 	}
 
+	if disableFunctions {
+		runReq.ToolChoice = "none"
+	}
+
+	log.Printf("TOOLS: %v\n", runReq.Tools)
 	run, err := client.CreateRun(ctx, threadID, runReq)
 	if err != nil {
 		log.Println("Unable to create run:", err)
@@ -132,7 +143,6 @@ func handleRequiresAction(
 	channelMsg := ChannelMessage{}
 
 	funcArgs := GetFunctionArgs(run)
-	outputs := make(map[string]string)
 	toolOutputs := make([]openai.ToolOutput, len(funcArgs))
 
 	sendChannelMessage := func() {
@@ -181,7 +191,7 @@ func handleRequiresAction(
 			}
 			channelMsg.ChannelID = dgChannID
 			channelMsg.Message = imgUrl
-			// messageCH <- channelMsg
+
 			log.Println("Recieved channel message. sending after desired timeout")
 
 			time.AfterFunc(
@@ -205,7 +215,10 @@ func handleRequiresAction(
 			err := json.Unmarshal([]byte(funcArg.JsonValue), &channelMsg)
 			if err != nil {
 				log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
-				outputs[funcArg.ToolID] = "error deserializing data"
+				toolOutputs[i] = openai.ToolOutput{
+					ToolCallID: funcArg.ToolID,
+					Output:     "error deserializing data",
+				}
 			}
 
 			time.AfterFunc(
@@ -214,8 +227,31 @@ func handleRequiresAction(
 			)
 
 			toolOutputs[i] = openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: "worked"}
-			outputs[funcArg.ToolID] = "Great Success!!"
 
+		case ToggleMorningMessage:
+			log.Println("toggle_morning_message()")
+			morningMsgFuncArgs := MorningMsgFuncArgs{}
+			err := json.Unmarshal([]byte(funcArg.JsonValue), &morningMsgFuncArgs)
+			if err != nil {
+				log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
+				toolOutputs[i] = openai.ToolOutput{
+					ToolCallID: funcArg.ToolID,
+					Output:     "error deserializing data",
+				}
+				break
+			}
+			output := toggleMorningMsg(
+				dg,
+				morningMsgFuncArgs,
+				dgChannID,
+				client,
+				state,
+			)
+
+			toolOutputs[i] = openai.ToolOutput{
+				ToolCallID: funcArg.ToolID,
+				Output:     output,
+			}
 		default:
 			toolOutputs[i] = openai.ToolOutput{
 				ToolCallID: funcArg.ToolID,
@@ -227,6 +263,139 @@ func handleRequiresAction(
 
 }
 
+func waitForReminderResponse(
+	dg *discordgo.Session,
+	channelID string,
+	userID string,
+	client *openai.Client,
+	state *State,
+) {
+
+	maxRemind := 5
+	timeoutMin := 2 * time.Minute
+	timer := time.NewTimer(timeoutMin)
+
+	reminds := 0
+	for {
+
+		<-timer.C
+
+		// this value is reset on messageCreate
+		if !state.threadMap[channelID].awaitsResponse || reminds == maxRemind {
+			timer.Stop()
+			return
+		}
+
+		reminds++
+		timeoutMin = timeoutMin * 2
+		timer.Reset(timeoutMin)
+
+		log.Println("sending another reminder")
+
+		if userID == "" {
+			userID = "they"
+		}
+
+		message := fmt.Sprintf(
+			"It looks %s haven't responsed to this reminder can you generate a response nagging them about it. This is not a tool request.",
+			mention(userID),
+		)
+
+		messageReq := openai.MessageRequest{
+			Role:    openai.ChatMessageRoleAssistant,
+			Content: message,
+		}
+
+		getAndSendResponse(context.Background(), dg, channelID, messageReq, client, state)
+	}
+
+}
+
+func mention(userID string) string {
+	return fmt.Sprint("<@%s>", userID)
+}
+
+func toggleMorningMsg(
+	dg *discordgo.Session,
+	morningMsgFuncArgs MorningMsgFuncArgs,
+	channelID string,
+	client *openai.Client,
+	state *State,
+) string {
+
+	const timeFmt = "15:04"
+	log.Println("Given time is: ", morningMsgFuncArgs.Time)
+	givenTime, err := time.Parse(timeFmt, morningMsgFuncArgs.Time)
+	if err != nil {
+		log.Println("could not format time: ", err)
+		return "could not format time"
+
+	}
+	now := time.Now()
+	givenTime = time.Date(
+		now.Year(),
+		now.Month(),
+		now.Day(),
+		givenTime.Hour(),
+		givenTime.Minute(),
+		0,
+		0,
+		now.Location(),
+	)
+
+	if givenTime.Before(now) {
+		givenTime = givenTime.Add(24 * time.Hour)
+	}
+
+	duration := givenTime.Sub(now)
+	log.Println("sending morning message in: ", duration)
+	// TODO: add cancel
+	ctx := context.Background()
+	go startMorningMessageLoop(
+		ctx,
+		dg,
+		morningMsgFuncArgs,
+		duration,
+		channelID,
+		client,
+		state)
+
+	return "worked"
+}
+
+// TODO: add context with cancel
+// TODO: group all timer calls into a common scheduler
+func startMorningMessageLoop(
+	ctx context.Context,
+	dg *discordgo.Session,
+	morningMsgFuncArgs MorningMsgFuncArgs,
+	duration time.Duration,
+	channelID string,
+	client *openai.Client,
+	state *State,
+) {
+	ticker := time.NewTicker(duration)
+
+	for {
+		<-ticker.C
+
+		log.Println("ticker expired sending morning message ...")
+
+		messageReq := openai.MessageRequest{
+			Role:    openai.ChatMessageRoleAssistant,
+			Content: "Please tell @here goodmorning. this is not a function call",
+		}
+
+		ctx = context.WithValue(ctx, DisableFunctions, true)
+		getAndSendResponse(ctx, dg, channelID, messageReq, client, state)
+
+		if duration != 24*time.Hour {
+			duration = 24 * time.Hour
+			ticker.Reset(duration)
+		}
+	}
+	// ticker.Stop()
+}
 func submitToolOutputs(
 	client *openai.Client,
 	toolOutputs []openai.ToolOutput,

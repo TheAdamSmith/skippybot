@@ -62,7 +62,11 @@ func StartRocketLeagueSession(
 		for {
 			select {
 			case gameInfo := <-fileCh:
-				getAndSendResponse(dg, channelID, gameInfo, client, state)
+				messageReq := openai.MessageRequest{
+					Role:    openai.ChatMessageRoleAssistant,
+					Content: gameInfo,
+				}
+				getAndSendResponse(context.Background(), dg, channelID, messageReq, client, state)
 			case <-ctx.Done():
 				log.Println("Received cancel command")
 				return
