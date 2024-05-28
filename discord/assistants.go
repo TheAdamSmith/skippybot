@@ -84,7 +84,6 @@ func GetResponse(
 		runReq.ToolChoice = "none"
 	}
 
-	log.Printf("TOOLS: %v\n", runReq.Tools)
 	run, err := client.CreateRun(ctx, threadID, runReq)
 	if err != nil {
 		log.Println("Unable to create run:", err)
@@ -323,6 +322,17 @@ func toggleMorningMsg(
 	state *State,
 ) string {
 
+	if !morningMsgFuncArgs.Enable {
+		cancel := state.threadMap[channelID].cancelFunc
+		if cancel == nil {
+			log.Println("cancel function does not exist returning")
+			return "worked"
+		}
+		cancel()
+		log.Println("canceled morning message")
+		return "worked"
+	}
+
 	const timeFmt = "15:04"
 	log.Println("Given time is: ", morningMsgFuncArgs.Time)
 	givenTime, err := time.Parse(timeFmt, morningMsgFuncArgs.Time)
@@ -331,6 +341,7 @@ func toggleMorningMsg(
 		return "could not format time"
 
 	}
+
 	now := time.Now()
 	givenTime = time.Date(
 		now.Year(),
@@ -349,8 +360,8 @@ func toggleMorningMsg(
 
 	duration := givenTime.Sub(now)
 	log.Println("sending morning message in: ", duration)
-	// TODO: add cancel
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	state.threadMap[channelID].cancelFunc = cancel
 	go startMorningMessageLoop(
 		ctx,
 		dg,
@@ -374,28 +385,43 @@ func startMorningMessageLoop(
 	client *openai.Client,
 	state *State,
 ) {
+
 	ticker := time.NewTicker(duration)
 
 	for {
-		<-ticker.C
+		select {
+		case <-ctx.Done():
 
-		log.Println("ticker expired sending morning message ...")
+			if err := ctx.Err(); err != nil {
+				log.Println("context canceled with error: ", err)
+				ticker.Stop()
+				return
 
-		messageReq := openai.MessageRequest{
-			Role:    openai.ChatMessageRoleAssistant,
-			Content: "Please tell @here goodmorning. this is not a function call",
-		}
+			} else {
+				log.Println("Context canceled. Stopping morning message")
+				return
+			}
 
-		ctx = context.WithValue(ctx, DisableFunctions, true)
-		getAndSendResponse(ctx, dg, channelID, messageReq, client, state)
+		case <-ticker.C:
 
-		if duration != 24*time.Hour {
-			duration = 24 * time.Hour
-			ticker.Reset(duration)
+			log.Println("ticker expired sending morning message ...")
+
+			messageReq := openai.MessageRequest{
+				Role:    openai.ChatMessageRoleAssistant,
+				Content: "Please tell @here goodmorning. this is not a function call",
+			}
+
+			ctx = context.WithValue(ctx, DisableFunctions, true)
+			getAndSendResponse(ctx, dg, channelID, messageReq, client, state)
+
+			if duration != 24*time.Hour {
+				duration = 24 * time.Hour
+				ticker.Reset(duration)
+			}
 		}
 	}
-	// ticker.Stop()
 }
+
 func submitToolOutputs(
 	client *openai.Client,
 	toolOutputs []openai.ToolOutput,

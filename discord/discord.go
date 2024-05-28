@@ -27,7 +27,9 @@ type chatThread struct {
 	openAIThread           openai.Thread
 	additionalInstructions string
 	awaitsResponse         bool
-	cancelFunc             context.CancelFunc
+	// TODO: this is can be used across multiple things (morning message, rl tracker, etc)
+	// should update this to use separate params
+	cancelFunc context.CancelFunc
 	// messages []string
 	// reponses []string
 }
