@@ -1,0 +1,20 @@
+{
+  "name": "toggle_morning_message",
+  "description": "turn on the bots morning message",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "enable": {
+        "type": "boolean",
+        "description": "is the morning message enabled"
+      },
+      "time": {
+        "type": "string",
+        "description": "the time of day to send the morning message"
+      }
+    },
+    "required": [
+      "enable"
+    ]
+  }
+}

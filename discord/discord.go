@@ -27,7 +27,9 @@ type chatThread struct {
 	openAIThread           openai.Thread
 	additionalInstructions string
 	awaitsResponse         bool
-	cancelFunc             context.CancelFunc
+	// TODO: this is can be used across multiple things (morning message, rl tracker, etc)
+	// should update this to use separate params
+	cancelFunc context.CancelFunc
 	// messages []string
 	// reponses []string
 }
@@ -100,52 +102,6 @@ func RunDiscord(token string, client *openai.Client, assistantID string) {
 	<-sc
 
 	dg.Close()
-}
-
-func waitForReminderResponse(
-	s *discordgo.Session,
-	channelID string,
-	userID string,
-	client *openai.Client,
-	c *State,
-) {
-
-	maxRemind := 5
-	timeoutMin := 2 * time.Minute
-	timer := time.NewTimer(timeoutMin)
-
-	reminds := 0
-	for {
-
-		<-timer.C
-
-		// this value is reset on messageCreate
-		if !c.threadMap[channelID].awaitsResponse || reminds == maxRemind {
-			timer.Stop()
-			return
-		}
-
-		reminds++
-		timeoutMin = timeoutMin * 2
-		timer.Reset(timeoutMin)
-
-		log.Println("sending another reminder")
-
-		if userID == "" {
-			userID = "they"
-		}
-
-		message := fmt.Sprintf(
-			"It looks %s haven't responsed to this reminder can you generate a response nagging them about it. This is not a tool request.",
-			mention(userID),
-		)
-		getAndSendResponse(s, channelID, message, client, c)
-	}
-
-}
-
-func mention(userID string) string {
-	return fmt.Sprint("<@%s>", userID)
 }
 
 func handleSlashCommand(
@@ -245,7 +201,11 @@ func messageCreate(
 
 	if threadExists {
 		if state.threadMap[m.ChannelID].awaitsResponse {
-			getAndSendResponse(s, m.ChannelID, m.Content, client, state)
+			messageReq := openai.MessageRequest{
+				Role:    openai.ChatMessageRoleUser,
+				Content: m.Content,
+			}
+			getAndSendResponse(context.Background(), s, m.ChannelID, messageReq, client, state)
 		}
 		// value used by reminders to see if it needs to send another message to user
 		state.threadMap[m.ChannelID].awaitsResponse = false
@@ -288,22 +248,26 @@ func messageCreate(
 
 	}
 	log.Println("CHANELLID: ", m.ChannelID)
-	getAndSendResponse(s, m.ChannelID, message, client, state)
+	messageReq := openai.MessageRequest{
+		Role:    openai.ChatMessageRoleUser,
+		Content: message,
+	}
+	getAndSendResponse(context.Background(), s, m.ChannelID, messageReq, client, state)
 }
 
 func getAndSendResponse(
+	ctx context.Context,
 	dg *discordgo.Session,
 	channelID string,
-	message string,
+	messageReq openai.MessageRequest,
 	client *openai.Client,
 	state *State) {
 	dg.ChannelTyping(channelID)
 
-	log.Printf("Recieved message: %s\n", message)
+	log.Printf("Recieved message: %s with role: %s\n", messageReq.Content, messageReq.Role)
 
 	log.Println("Attempting to get response...")
 
-	ctx := context.Background()
 	ctx = context.WithValue(ctx, DGChannelID, channelID)
 	ctx = context.WithValue(ctx, ThreadID, state.threadMap[channelID].openAIThread.ID)
 	ctx = context.WithValue(ctx, AssistantID, state.assistantID)
@@ -311,7 +275,7 @@ func getAndSendResponse(
 	response, err := GetResponse(
 		ctx,
 		dg,
-		message,
+		messageReq,
 		state,
 		client,
 		state.threadMap[channelID].additionalInstructions,
