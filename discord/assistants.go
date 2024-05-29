@@ -14,7 +14,7 @@ import (
 
 const (
 	// ai functions
-	GetStockPrice        string = "get_stock_price"
+	GetStockPriceKey     string = "get_stock_price"
 	SendChannelMessage   string = "send_channel_message"
 	SetReminder          string = "set_reminder"
 	GenerateImage        string = "generate_image"
@@ -164,9 +164,25 @@ func handleRequiresAction(
 
 		switch funcName := funcArg.FuncName; funcName {
 
-		case GetStockPrice:
+		case GetStockPriceKey:
 			log.Println("get_stock_price(): sending 150: ")
-			toolOutputs[i] = openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: "150"}
+			stockFuncArgs := StockFuncArgs{}
+			err := json.Unmarshal([]byte(funcArg.JsonValue), &stockFuncArgs)
+			if err != nil {
+				log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
+				toolOutputs[i] = openai.ToolOutput{
+					ToolCallID: funcArg.ToolID,
+					Output:     "error deserializing data",
+				}
+				continue
+			}
+			log.Println(stockFuncArgs.Symbol)
+			output, err := getStockPrice(stockFuncArgs.Symbol)
+			if err != nil {
+				log.Println("Unable to get stock price: ", err)
+				output = "There was a problem making that api call"
+			}
+			toolOutputs[i] = openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: output}
 		case GenerateImage:
 			generateImageFuncArgs := GenerateImageFuncArgs{}
 			err := json.Unmarshal([]byte(funcArg.JsonValue), &generateImageFuncArgs)
