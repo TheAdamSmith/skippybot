@@ -121,7 +121,10 @@ func GetResponse(
 		}
 
 		if run.Status == openai.RunStatusRequiresAction {
-			handleRequiresAction(dg, run, dgChannID, threadID, state, client)
+			run, err = handleRequiresAction(dg, run, dgChannID, threadID, state, client)
+			if err != nil {
+				return "", err
+			}
 		}
 
 		time.Sleep(time.Duration(100*runDelay) * time.Millisecond)
@@ -138,144 +141,239 @@ func handleRequiresAction(
 	client *openai.Client,
 ) (openai.Run, error) {
 
-	// TODO: this used across multiple function could cause issues
-	channelMsg := ChannelMessage{}
-
 	funcArgs := GetFunctionArgs(run)
-	toolOutputs := make([]openai.ToolOutput, len(funcArgs))
 
-	sendChannelMessage := func() {
-		log.Println("attempting to send message on: ", channelMsg.ChannelID)
-		dg.ChannelMessageSend(channelMsg.ChannelID, channelMsg.Message)
-		if channelMsg.IsReminder {
-			state.threadMap[channelMsg.ChannelID].awaitsResponse = true
-			go waitForReminderResponse(
-				dg,
-				channelMsg.ChannelID,
-				channelMsg.UserID,
-				client,
-				state,
-			)
-
-		}
-	}
-
-	for i, funcArg := range funcArgs {
+	var toolOutputs []openai.ToolOutput
+	for _, funcArg := range funcArgs {
 
 		switch funcName := funcArg.FuncName; funcName {
 
 		case GetStockPriceKey:
-			log.Println("get_stock_price(): sending 150: ")
-			stockFuncArgs := StockFuncArgs{}
-			err := json.Unmarshal([]byte(funcArg.JsonValue), &stockFuncArgs)
+			log.Println("get_stock_price()")
+
+			output, err := handleGetStockPrice(dg, funcArg, client, state)
 			if err != nil {
-				log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
-				toolOutputs[i] = openai.ToolOutput{
-					ToolCallID: funcArg.ToolID,
-					Output:     "error deserializing data",
-				}
-				continue
+				log.Println("error handling get_stock_price: ", err)
 			}
-			log.Println(stockFuncArgs.Symbol)
-			output, err := getStockPrice(stockFuncArgs.Symbol)
-			if err != nil {
-				log.Println("Unable to get stock price: ", err)
-				output = "There was a problem making that api call"
-			}
-			toolOutputs[i] = openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: output}
+
+			toolOutputs = append(
+				toolOutputs,
+				openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: output},
+			)
+
 		case GenerateImage:
-			generateImageFuncArgs := GenerateImageFuncArgs{}
-			err := json.Unmarshal([]byte(funcArg.JsonValue), &generateImageFuncArgs)
-			if err != nil {
-				log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
-				toolOutputs[i] = openai.ToolOutput{
-					ToolCallID: funcArg.ToolID,
-					Output:     "error deserializing data",
-				}
-				continue
-			}
-
-			imgUrl, err := GetImgUrl(generateImageFuncArgs.Prompt, client)
-			if err != nil {
-				log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
-				toolOutputs[i] = openai.ToolOutput{
-					ToolCallID: funcArg.ToolID,
-					Output:     "error getting image data",
-				}
-				continue
-			}
-			channelMsg.ChannelID = dgChannID
-			channelMsg.Message = imgUrl
-
-			log.Println("Recieved channel message. sending after desired timeout")
-
-			time.AfterFunc(
-				time.Duration(channelMsg.TimerLength)*time.Second,
-				sendChannelMessage,
-			)
-			toolOutputs[i] = openai.ToolOutput{
-				ToolCallID: funcArg.ToolID,
-				Output:     "worked",
-			}
-
-		case SetReminder:
-			log.Println("set_reminder()")
-			channelMsg.ChannelID = dgChannID
-			channelMsg.IsReminder = true
-			fallthrough
-
-		case SendChannelMessage:
-			log.Println("send_channel_message()")
-
-			err := json.Unmarshal([]byte(funcArg.JsonValue), &channelMsg)
-			if err != nil {
-				log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
-				toolOutputs[i] = openai.ToolOutput{
-					ToolCallID: funcArg.ToolID,
-					Output:     "error deserializing data",
-				}
-			}
-
-			time.AfterFunc(
-				time.Duration(channelMsg.TimerLength)*time.Second,
-				sendChannelMessage,
-			)
-
-			toolOutputs[i] = openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: "worked"}
-
-		case ToggleMorningMessage:
-			log.Println("toggle_morning_message()")
-			morningMsgFuncArgs := MorningMsgFuncArgs{}
-			err := json.Unmarshal([]byte(funcArg.JsonValue), &morningMsgFuncArgs)
-			if err != nil {
-				log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
-				toolOutputs[i] = openai.ToolOutput{
-					ToolCallID: funcArg.ToolID,
-					Output:     "error deserializing data",
-				}
-				break
-			}
-			output := toggleMorningMsg(
+			output, err := getAndSendImage(
+				context.Background(),
 				dg,
-				morningMsgFuncArgs,
+				funcArg,
 				dgChannID,
 				client,
 				state,
 			)
+			if err != nil {
+				log.Println("unable to get image: ", err)
+			}
+			toolOutputs = append(
+				toolOutputs,
+				openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: output},
+			)
 
-			toolOutputs[i] = openai.ToolOutput{
-				ToolCallID: funcArg.ToolID,
-				Output:     output,
+		case SetReminder:
+			log.Println("set_reminder()")
+			output, err := setReminder(context.Background(), dg, funcArg, dgChannID, client, state)
+			if err != nil {
+				log.Println("error sending channel message: ", err)
 			}
+			toolOutputs = append(
+				toolOutputs,
+				openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: output},
+			)
+
+		case SendChannelMessage:
+			log.Println("send_channel_message()")
+			output, err := sendChannelMessage(context.Background(), dg, funcArg, client, state)
+			if err != nil {
+				log.Println("error sending channel message: ", err)
+			}
+			toolOutputs = append(
+				toolOutputs,
+				openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: output},
+			)
+
+		case ToggleMorningMessage:
+			log.Println("toggle_morning_message()")
+			output, err := handleMorningMessage(dg, funcArg, dgChannID, client, state)
+			if err != nil {
+				log.Println("error handling morning message: ", err)
+			}
+			toolOutputs = append(
+				toolOutputs,
+				openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: output},
+			)
 		default:
-			toolOutputs[i] = openai.ToolOutput{
-				ToolCallID: funcArg.ToolID,
-				Output:     "error. Pretend like you had a problem with submind",
-			}
+			toolOutputs = append(
+				toolOutputs,
+				openai.ToolOutput{
+					ToolCallID: funcArg.ToolID,
+					Output:     "Found unknown function. pretend like you had a problem with a submind",
+				},
+			)
 		}
 	}
 	return submitToolOutputs(client, toolOutputs, threadID, run.ID)
 
+}
+
+func handleGetStockPrice(
+	dg *discordgo.Session,
+	funcArg FuncArgs,
+	client *openai.Client,
+	state *State,
+
+) (string, error) {
+
+	stockFuncArgs := StockFuncArgs{}
+	err := json.Unmarshal([]byte(funcArg.JsonValue), &stockFuncArgs)
+	if err != nil {
+		log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
+		return "Error deserializing data", err
+	}
+
+	log.Println("getting price for: ", stockFuncArgs.Symbol)
+
+	output, err := getStockPrice(stockFuncArgs.Symbol)
+	if err != nil {
+		log.Println("Unable to get stock price: ", err)
+		return "There was a problem making that api call", err
+	}
+
+	return output, nil
+}
+
+func handleMorningMessage(
+	dg *discordgo.Session,
+	funcArg FuncArgs,
+	dgChannID string,
+	client *openai.Client,
+	state *State,
+) (string, error) {
+
+	morningMsgFuncArgs := MorningMsgFuncArgs{}
+	err := json.Unmarshal([]byte(funcArg.JsonValue), &morningMsgFuncArgs)
+	if err != nil {
+		log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
+		return "Error deserializing data", err
+	}
+
+	output := toggleMorningMsg(
+		dg,
+		morningMsgFuncArgs,
+		dgChannID,
+		client,
+		state,
+	)
+
+	return output, nil
+}
+
+func getAndSendImage(
+	ctx context.Context,
+	dg *discordgo.Session,
+	funcArg FuncArgs,
+	channelID string,
+	client *openai.Client,
+	state *State,
+
+) (string, error) {
+
+	generateImageFuncArgs := GenerateImageFuncArgs{}
+	err := json.Unmarshal([]byte(funcArg.JsonValue), &generateImageFuncArgs)
+	if err != nil {
+		log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
+		return "Unable to deserialize data", nil
+	}
+
+	imgUrl, err := GetImgUrl(generateImageFuncArgs.Prompt, client)
+	if err != nil {
+		log.Println("unable to generate images", err)
+		return "Unable to generate image", err
+	}
+
+	_, err = dg.ChannelMessageSend(channelID, imgUrl)
+	if err != nil {
+		log.Println("unable to send message on channel: ", err)
+	}
+	return "image generated", nil
+}
+
+func sendChannelMessage(
+	ctx context.Context,
+	dg *discordgo.Session,
+	funcArg FuncArgs,
+	client *openai.Client,
+	state *State,
+) (string, error) {
+	var channelMsg ChannelMessage
+	err := json.Unmarshal([]byte(funcArg.JsonValue), &channelMsg)
+	if err != nil {
+		log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
+		return "Unable to deserialize data", err
+	}
+
+	log.Println("attempting to send message on: ", channelMsg.ChannelID)
+	_, err = dg.ChannelMessageSend(channelMsg.ChannelID, channelMsg.Message)
+	if err != nil {
+		log.Println("Unable to send message on channelMsg.channelID: ", err)
+		return "Unable to send message", err
+	}
+	return "sent!", nil
+
+}
+
+func setReminder(
+	ctx context.Context,
+	dg *discordgo.Session,
+	funcArg FuncArgs,
+	channelID string,
+	client *openai.Client,
+	state *State,
+) (string, error) {
+
+	var channelMsg ChannelMessage
+	channelMsg.ChannelID = channelID
+
+	err := json.Unmarshal([]byte(funcArg.JsonValue), &channelMsg)
+	if err != nil {
+		log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
+		return "Unable to deserialize data", err
+	}
+
+	duration := time.Duration(channelMsg.TimerLength) * time.Second
+
+	log.Printf(
+		"attempting to send reminder on %s in %s\n",
+		channelMsg.ChannelID,
+		duration,
+	)
+
+	time.AfterFunc(
+		duration,
+		func() {
+			dg.ChannelMessageSend(channelMsg.ChannelID, channelMsg.Message)
+		},
+	)
+
+	state.threadMap[channelMsg.ChannelID].awaitsResponse = true
+
+	go waitForReminderResponse(
+		dg,
+		channelMsg.ChannelID,
+		channelMsg.UserID,
+		client,
+		state,
+	)
+
+	return "worked", nil
 }
 
 func waitForReminderResponse(
@@ -390,7 +488,6 @@ func toggleMorningMsg(
 	return "worked"
 }
 
-// TODO: add context with cancel
 // TODO: group all timer calls into a common scheduler
 func startMorningMessageLoop(
 	ctx context.Context,
