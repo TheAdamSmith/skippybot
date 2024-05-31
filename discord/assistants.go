@@ -15,6 +15,7 @@ import (
 const (
 	// ai functions
 	GetStockPriceKey     string = "get_stock_price"
+	GetWeatherKey        string = "get_weather"
 	SendChannelMessage   string = "send_channel_message"
 	SetReminder          string = "set_reminder"
 	GenerateImage        string = "generate_image"
@@ -29,6 +30,10 @@ type FuncArgs struct {
 
 type StockFuncArgs struct {
 	Symbol string
+}
+
+type WeatherFuncArgs struct {
+	Location string
 }
 
 type GenerateImageFuncArgs struct {
@@ -161,6 +166,18 @@ func handleRequiresAction(
 				openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: output},
 			)
 
+		case GetWeatherKey:
+			log.Println(GetWeatherKey)
+
+			output, err := handleGetWeather(dg, funcArg, client, state)
+			if err != nil {
+				log.Println("error handling get_stock_price: ", err)
+			}
+
+			toolOutputs = append(
+				toolOutputs,
+				openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: output},
+			)
 		case GenerateImage:
 			output, err := getAndSendImage(
 				context.Background(),
@@ -222,6 +239,32 @@ func handleRequiresAction(
 	}
 	return submitToolOutputs(client, toolOutputs, threadID, run.ID)
 
+}
+
+func handleGetWeather(
+	dg *discordgo.Session,
+	funcArg FuncArgs,
+	client *openai.Client,
+	state *State,
+
+) (string, error) {
+
+	weatherFuncArgs := WeatherFuncArgs{}
+	err := json.Unmarshal([]byte(funcArg.JsonValue), &weatherFuncArgs)
+	if err != nil {
+		log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
+		return "Error deserializing data", err
+	}
+
+	log.Println("getting weather for: ", weatherFuncArgs.Location)
+
+	output, err := getWeather(weatherFuncArgs.Location)
+	if err != nil {
+		log.Println("Unable to get stock price: ", err)
+		return "There was a problem making that api call", err
+	}
+
+	return output, nil
 }
 
 func handleGetStockPrice(

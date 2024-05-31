@@ -1,0 +1,16 @@
+{
+  "name": "get_weather",
+  "description": "get the weather from a location",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "location": {
+        "type": "string",
+        "description": "the location as a query parameter for Weather API"
+      }
+    },
+    "required": [
+      "location"
+    ]
+  }
+}
