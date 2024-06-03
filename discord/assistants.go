@@ -99,17 +99,21 @@ func GetResponse(
 	log.Println("Run status: ", run.Status)
 
 	runDelay := 1
-
+	prevStatus := run.Status
 	for {
 		run, err = client.RetrieveRun(ctx, run.ThreadID, run.ID)
 		if err != nil {
 			log.Println("error retrieving run: ", err)
 		}
 
-		log.Printf("Run status: %s\n", run.Status)
+		if prevStatus != run.Status {
+			log.Printf("Run status: %s\n", run.Status)
+			prevStatus = run.Status
+		}
+
 		switch run.Status {
 		case openai.RunStatusInProgress, openai.RunStatusQueued:
-			break
+			continue
 		case openai.RunStatusFailed:
 			errorMsg := fmt.Sprintf(
 				"openai run failed with code code (%s): %s",
@@ -163,8 +167,8 @@ func handleRequiresAction(
 	var toolOutputs []openai.ToolOutput
 	for _, funcArg := range funcArgs {
 
+		log.Printf("recieved function request:%+v", funcArg)
 		switch funcName := funcArg.FuncName; funcName {
-
 		case GetStockPriceKey:
 			log.Println("get_stock_price()")
 
@@ -191,6 +195,7 @@ func handleRequiresAction(
 				openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: output},
 			)
 		case GenerateImage:
+			log.Println(GenerateImage)
 			output, err := getAndSendImage(
 				context.Background(),
 				dg,
@@ -353,6 +358,8 @@ func getAndSendImage(
 		log.Println("unable to generate images", err)
 		return "Unable to generate image", err
 	}
+
+	log.Printf("recieved image url (%s) attempting to send on channel %s\n", imgUrl, channelID)
 
 	_, err = dg.ChannelMessageSend(channelID, imgUrl)
 	if err != nil {
