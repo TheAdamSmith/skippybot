@@ -116,14 +116,20 @@ func getWeather(location string) (string, error) {
 		return "", err
 	}
 
-	dailyForecast := weatherData.Forecast.Forecastday[0]
-	dailyForecast.Hour = []Hour{}
-	jsonForecast, err := json.Marshal(dailyForecast)
+	var forecastDays []ForecastDay
+	for _, forcastDay := range weatherData.Forecast.Forecastday {
+		forcastDay.Hour = []Hour{}
+		forecastDays = append(forecastDays, forcastDay)
+	}
+	// dailyForecast := weatherData.Forecast.Forecastday[0]
+
+	// dailyForecast.Hour = []Hour{}
+	jsonForecast, err := json.Marshal(forecastDays)
 	if err != nil {
 		return "", err
 	}
 	log.Println("Forecast: ", string(jsonForecast))
-	return fmt.Sprintf("here is the json data only comment on the temperature in freedom units, precipitation, and condition: %s", string(jsonForecast)), nil
+	return fmt.Sprintf("here is the json data only comment on the temperature in freedom units, precipitation, and condition: %s. Only comment on the requested day. If no day was specified by the user only give the details for today", string(jsonForecast)), nil
 }
 
 type WeatherData struct {

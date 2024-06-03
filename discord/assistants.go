@@ -107,15 +107,25 @@ func GetResponse(
 		}
 
 		log.Printf("Run status: %s\n", run.Status)
-
-		if run.Status == openai.RunStatusCompleted {
-
+		switch run.Status {
+		case openai.RunStatusInProgress, openai.RunStatusQueued:
+			break
+		case openai.RunStatusFailed:
+			errorMsg := fmt.Sprintf(
+				"openai run failed with code code (%s): %s",
+				run.LastError.Code,
+				run.LastError.Message,
+			)
+			log.Println(errorMsg)
+			return "", fmt.Errorf(errorMsg)
+		case openai.RunStatusCompleted:
 			messageList, err := client.ListMessage(ctx, threadID, nil, nil, nil, nil)
 			if err != nil {
 				return "", fmt.Errorf("unable to get messages: %s", err)
 			}
 
 			log.Println("Recieived message from thread: ", threadID)
+
 			message, err := getFirstMessage(messageList)
 			if err != nil {
 				return "", fmt.Errorf("unable to get first message: %s", err)
@@ -123,13 +133,15 @@ func GetResponse(
 			log.Println("Received response from ai: ", message)
 			return message, nil
 
-		}
-
-		if run.Status == openai.RunStatusRequiresAction {
+		case openai.RunStatusRequiresAction:
 			run, err = handleRequiresAction(dg, run, dgChannID, threadID, state, client)
 			if err != nil {
 				return "", err
 			}
+		default:
+			log.Println("recieved unkown status from openai")
+			return "", fmt.Errorf("receieved unknown status from openai")
+
 		}
 
 		time.Sleep(time.Duration(100*runDelay) * time.Millisecond)
