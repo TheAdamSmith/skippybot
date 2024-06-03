@@ -11,6 +11,20 @@
       "time": {
         "type": "string",
         "description": "the time of day to send the morning message"
+      },
+      "weather_locations": {
+        "type": "array",
+        "description": "the list of locations to get the weather for in the morning message",
+        "items": {
+          "type": "string"
+        }
+      },
+      "stocks": {
+        "type": "array",
+        "description": "list of tickers to get the price for in the morning",
+        "items": {
+          "type": "string"
+        }
       }
     },
     "required": [

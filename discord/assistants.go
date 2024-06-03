@@ -41,8 +41,10 @@ type GenerateImageFuncArgs struct {
 }
 
 type MorningMsgFuncArgs struct {
-	Enable bool   `json:"enable"`
-	Time   string `json:"time"`
+	Enable           bool     `json:"enable"`
+	Time             string   `json:"time"`
+	WeatherLocations []string `json:"weather_locations,omitempty"`
+	Stocks           []string `json:"stocks,omitempty"`
 }
 
 func GetResponse(
@@ -581,11 +583,31 @@ func startMorningMessageLoop(
 
 			log.Println("ticker expired sending morning message ...")
 
-			messageReq := openai.MessageRequest{
-				Role:    openai.ChatMessageRoleAssistant,
-				Content: "Please tell @here goodmorning. this is not a function call",
+			message := "Please tell everyone @here good morning. The data following this message is the weather and stock price information to include in the message. this is not a function call"
+			for _, location := range morningMsgFuncArgs.WeatherLocations {
+				weather, err := getWeather(location)
+				if err != nil {
+					log.Printf("unable to get weather for %s: %s\n", location, err)
+					continue
+				}
+				message += location + ":" + weather
 			}
 
+			for _, stock := range morningMsgFuncArgs.Stocks {
+				stockPrice, err := getStockPrice(stock)
+				if err != nil {
+					log.Printf("unable to get weather for %s: %s\n", stock, err)
+					continue
+				}
+				message += stock + ":" + stockPrice
+			}
+
+			log.Println("getting morning message with prompt: ", message)
+
+			messageReq := openai.MessageRequest{
+				Role:    openai.ChatMessageRoleAssistant,
+				Content: message,
+			}
 			ctx = context.WithValue(ctx, DisableFunctions, true)
 			getAndSendResponse(ctx, dg, channelID, messageReq, client, state)
 
