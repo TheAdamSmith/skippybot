@@ -3,12 +3,15 @@ package discord
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/sashabaranov/go-openai"
 )
 
 // TODO: find better name
 func GetImgUrl(prompt string, client *openai.Client) (string, error) {
+	log.Println("generating image from prompt: ", prompt)
+
 	imgReq := openai.ImageRequest{
 		Prompt:         prompt,
 		Size:           openai.CreateImageSize256x256,

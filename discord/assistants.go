@@ -14,7 +14,8 @@ import (
 
 const (
 	// ai functions
-	GetStockPrice        string = "get_stock_price"
+	GetStockPriceKey     string = "get_stock_price"
+	GetWeatherKey        string = "get_weather"
 	SendChannelMessage   string = "send_channel_message"
 	SetReminder          string = "set_reminder"
 	GenerateImage        string = "generate_image"
@@ -31,13 +32,19 @@ type StockFuncArgs struct {
 	Symbol string
 }
 
+type WeatherFuncArgs struct {
+	Location string
+}
+
 type GenerateImageFuncArgs struct {
 	Prompt string `json:"prompt"`
 }
 
 type MorningMsgFuncArgs struct {
-	Enable bool   `json:"enable"`
-	Time   string `json:"time"`
+	Enable           bool     `json:"enable"`
+	Time             string   `json:"time"`
+	WeatherLocations []string `json:"weather_locations,omitempty"`
+	Stocks           []string `json:"stocks,omitempty"`
 }
 
 func GetResponse(
@@ -94,23 +101,37 @@ func GetResponse(
 	log.Println("Run status: ", run.Status)
 
 	runDelay := 1
-
+	prevStatus := run.Status
 	for {
 		run, err = client.RetrieveRun(ctx, run.ThreadID, run.ID)
 		if err != nil {
 			log.Println("error retrieving run: ", err)
 		}
 
-		log.Printf("Run status: %s\n", run.Status)
+		if prevStatus != run.Status {
+			log.Printf("Run status: %s\n", run.Status)
+			prevStatus = run.Status
+		}
 
-		if run.Status == openai.RunStatusCompleted {
-
+		switch run.Status {
+		case openai.RunStatusInProgress, openai.RunStatusQueued:
+			continue
+		case openai.RunStatusFailed:
+			errorMsg := fmt.Sprintf(
+				"openai run failed with code code (%s): %s",
+				run.LastError.Code,
+				run.LastError.Message,
+			)
+			log.Println(errorMsg)
+			return "", fmt.Errorf(errorMsg)
+		case openai.RunStatusCompleted:
 			messageList, err := client.ListMessage(ctx, threadID, nil, nil, nil, nil)
 			if err != nil {
 				return "", fmt.Errorf("unable to get messages: %s", err)
 			}
 
 			log.Println("Recieived message from thread: ", threadID)
+
 			message, err := getFirstMessage(messageList)
 			if err != nil {
 				return "", fmt.Errorf("unable to get first message: %s", err)
@@ -118,10 +139,15 @@ func GetResponse(
 			log.Println("Received response from ai: ", message)
 			return message, nil
 
-		}
+		case openai.RunStatusRequiresAction:
+			run, err = handleRequiresAction(dg, run, dgChannID, threadID, state, client)
+			if err != nil {
+				return "", err
+			}
+		default:
+			log.Println("recieved unkown status from openai")
+			return "", fmt.Errorf("receieved unknown status from openai")
 
-		if run.Status == openai.RunStatusRequiresAction {
-			handleRequiresAction(dg, run, dgChannID, threadID, state, client)
 		}
 
 		time.Sleep(time.Duration(100*runDelay) * time.Millisecond)
@@ -138,128 +164,280 @@ func handleRequiresAction(
 	client *openai.Client,
 ) (openai.Run, error) {
 
-	// TODO: this used across multiple function could cause issues
-	channelMsg := ChannelMessage{}
-
 	funcArgs := GetFunctionArgs(run)
-	toolOutputs := make([]openai.ToolOutput, len(funcArgs))
 
-	sendChannelMessage := func() {
-		log.Println("attempting to send message on: ", channelMsg.ChannelID)
-		dg.ChannelMessageSend(channelMsg.ChannelID, channelMsg.Message)
-		if channelMsg.IsReminder {
-			state.threadMap[channelMsg.ChannelID].awaitsResponse = true
-			go waitForReminderResponse(
-				dg,
-				channelMsg.ChannelID,
-				channelMsg.UserID,
-				client,
-				state,
-			)
+	var toolOutputs []openai.ToolOutput
+	for _, funcArg := range funcArgs {
 
-		}
-	}
-
-	for i, funcArg := range funcArgs {
-
+		log.Printf("recieved function request:%+v", funcArg)
 		switch funcName := funcArg.FuncName; funcName {
+		case GetStockPriceKey:
+			log.Println("get_stock_price()")
 
-		case GetStockPrice:
-			log.Println("get_stock_price(): sending 150: ")
-			toolOutputs[i] = openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: "150"}
+			output, err := handleGetStockPrice(dg, funcArg, client, state)
+			if err != nil {
+				log.Println("error handling get_stock_price: ", err)
+			}
+
+			toolOutputs = append(
+				toolOutputs,
+				openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: output},
+			)
+
+		case GetWeatherKey:
+			log.Println(GetWeatherKey)
+
+			output, err := handleGetWeather(dg, funcArg, client, state)
+			if err != nil {
+				log.Println("error handling get_stock_price: ", err)
+			}
+
+			toolOutputs = append(
+				toolOutputs,
+				openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: output},
+			)
 		case GenerateImage:
-			generateImageFuncArgs := GenerateImageFuncArgs{}
-			err := json.Unmarshal([]byte(funcArg.JsonValue), &generateImageFuncArgs)
-			if err != nil {
-				log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
-				toolOutputs[i] = openai.ToolOutput{
-					ToolCallID: funcArg.ToolID,
-					Output:     "error deserializing data",
-				}
-				continue
-			}
-
-			imgUrl, err := GetImgUrl(generateImageFuncArgs.Prompt, client)
-			if err != nil {
-				log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
-				toolOutputs[i] = openai.ToolOutput{
-					ToolCallID: funcArg.ToolID,
-					Output:     "error getting image data",
-				}
-				continue
-			}
-			channelMsg.ChannelID = dgChannID
-			channelMsg.Message = imgUrl
-
-			log.Println("Recieved channel message. sending after desired timeout")
-
-			time.AfterFunc(
-				time.Duration(channelMsg.TimerLength)*time.Second,
-				sendChannelMessage,
-			)
-			toolOutputs[i] = openai.ToolOutput{
-				ToolCallID: funcArg.ToolID,
-				Output:     "worked",
-			}
-
-		case SetReminder:
-			log.Println("set_reminder()")
-			channelMsg.ChannelID = dgChannID
-			channelMsg.IsReminder = true
-			fallthrough
-
-		case SendChannelMessage:
-			log.Println("send_channel_message()")
-
-			err := json.Unmarshal([]byte(funcArg.JsonValue), &channelMsg)
-			if err != nil {
-				log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
-				toolOutputs[i] = openai.ToolOutput{
-					ToolCallID: funcArg.ToolID,
-					Output:     "error deserializing data",
-				}
-			}
-
-			time.AfterFunc(
-				time.Duration(channelMsg.TimerLength)*time.Second,
-				sendChannelMessage,
-			)
-
-			toolOutputs[i] = openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: "worked"}
-
-		case ToggleMorningMessage:
-			log.Println("toggle_morning_message()")
-			morningMsgFuncArgs := MorningMsgFuncArgs{}
-			err := json.Unmarshal([]byte(funcArg.JsonValue), &morningMsgFuncArgs)
-			if err != nil {
-				log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
-				toolOutputs[i] = openai.ToolOutput{
-					ToolCallID: funcArg.ToolID,
-					Output:     "error deserializing data",
-				}
-				break
-			}
-			output := toggleMorningMsg(
+			log.Println(GenerateImage)
+			output, err := getAndSendImage(
+				context.Background(),
 				dg,
-				morningMsgFuncArgs,
+				funcArg,
 				dgChannID,
 				client,
 				state,
 			)
+			if err != nil {
+				log.Println("unable to get image: ", err)
+			}
+			toolOutputs = append(
+				toolOutputs,
+				openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: output},
+			)
 
-			toolOutputs[i] = openai.ToolOutput{
-				ToolCallID: funcArg.ToolID,
-				Output:     output,
+		case SetReminder:
+			log.Println("set_reminder()")
+			output, err := setReminder(context.Background(), dg, funcArg, dgChannID, client, state)
+			if err != nil {
+				log.Println("error sending channel message: ", err)
 			}
+			toolOutputs = append(
+				toolOutputs,
+				openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: output},
+			)
+
+		case SendChannelMessage:
+			log.Println("send_channel_message()")
+			output, err := sendChannelMessage(context.Background(), dg, funcArg, client, state)
+			if err != nil {
+				log.Println("error sending channel message: ", err)
+			}
+			toolOutputs = append(
+				toolOutputs,
+				openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: output},
+			)
+
+		case ToggleMorningMessage:
+			log.Println("toggle_morning_message()")
+			output, err := handleMorningMessage(dg, funcArg, dgChannID, client, state)
+			if err != nil {
+				log.Println("error handling morning message: ", err)
+			}
+			toolOutputs = append(
+				toolOutputs,
+				openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: output},
+			)
 		default:
-			toolOutputs[i] = openai.ToolOutput{
-				ToolCallID: funcArg.ToolID,
-				Output:     "error. Pretend like you had a problem with submind",
-			}
+			toolOutputs = append(
+				toolOutputs,
+				openai.ToolOutput{
+					ToolCallID: funcArg.ToolID,
+					Output:     "Found unknown function. pretend like you had a problem with a submind",
+				},
+			)
 		}
 	}
 	return submitToolOutputs(client, toolOutputs, threadID, run.ID)
 
+}
+
+func handleGetWeather(
+	dg *discordgo.Session,
+	funcArg FuncArgs,
+	client *openai.Client,
+	state *State,
+
+) (string, error) {
+
+	weatherFuncArgs := WeatherFuncArgs{}
+	err := json.Unmarshal([]byte(funcArg.JsonValue), &weatherFuncArgs)
+	if err != nil {
+		log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
+		return "Error deserializing data", err
+	}
+
+	log.Println("getting weather for: ", weatherFuncArgs.Location)
+
+	output, err := getWeather(weatherFuncArgs.Location)
+	if err != nil {
+		log.Println("Unable to get stock price: ", err)
+		return "There was a problem making that api call", err
+	}
+
+	return output, nil
+}
+
+func handleGetStockPrice(
+	dg *discordgo.Session,
+	funcArg FuncArgs,
+	client *openai.Client,
+	state *State,
+
+) (string, error) {
+
+	stockFuncArgs := StockFuncArgs{}
+	err := json.Unmarshal([]byte(funcArg.JsonValue), &stockFuncArgs)
+	if err != nil {
+		log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
+		return "Error deserializing data", err
+	}
+
+	log.Println("getting price for: ", stockFuncArgs.Symbol)
+
+	output, err := getStockPrice(stockFuncArgs.Symbol)
+	if err != nil {
+		log.Println("Unable to get stock price: ", err)
+		return "There was a problem making that api call", err
+	}
+
+	return output, nil
+}
+
+func handleMorningMessage(
+	dg *discordgo.Session,
+	funcArg FuncArgs,
+	dgChannID string,
+	client *openai.Client,
+	state *State,
+) (string, error) {
+
+	morningMsgFuncArgs := MorningMsgFuncArgs{}
+	err := json.Unmarshal([]byte(funcArg.JsonValue), &morningMsgFuncArgs)
+	if err != nil {
+		log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
+		return "Error deserializing data", err
+	}
+
+	output := toggleMorningMsg(
+		dg,
+		morningMsgFuncArgs,
+		dgChannID,
+		client,
+		state,
+	)
+
+	return output, nil
+}
+
+func getAndSendImage(
+	ctx context.Context,
+	dg *discordgo.Session,
+	funcArg FuncArgs,
+	channelID string,
+	client *openai.Client,
+	state *State,
+
+) (string, error) {
+
+	generateImageFuncArgs := GenerateImageFuncArgs{}
+	err := json.Unmarshal([]byte(funcArg.JsonValue), &generateImageFuncArgs)
+	if err != nil {
+		log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
+		return "Unable to deserialize data", nil
+	}
+
+	imgUrl, err := GetImgUrl(generateImageFuncArgs.Prompt, client)
+	if err != nil {
+		log.Println("unable to generate images", err)
+		return "Unable to generate image", err
+	}
+
+	log.Printf("recieved image url (%s) attempting to send on channel %s\n", imgUrl, channelID)
+
+	_, err = dg.ChannelMessageSend(channelID, imgUrl)
+	if err != nil {
+		log.Println("unable to send message on channel: ", err)
+	}
+	return "image generated", nil
+}
+
+func sendChannelMessage(
+	ctx context.Context,
+	dg *discordgo.Session,
+	funcArg FuncArgs,
+	client *openai.Client,
+	state *State,
+) (string, error) {
+	var channelMsg ChannelMessage
+	err := json.Unmarshal([]byte(funcArg.JsonValue), &channelMsg)
+	if err != nil {
+		log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
+		return "Unable to deserialize data", err
+	}
+
+	log.Println("attempting to send message on: ", channelMsg.ChannelID)
+	_, err = dg.ChannelMessageSend(channelMsg.ChannelID, channelMsg.Message)
+	if err != nil {
+		log.Println("Unable to send message on channelMsg.channelID: ", err)
+		return "Unable to send message", err
+	}
+	return "sent!", nil
+
+}
+
+func setReminder(
+	ctx context.Context,
+	dg *discordgo.Session,
+	funcArg FuncArgs,
+	channelID string,
+	client *openai.Client,
+	state *State,
+) (string, error) {
+
+	var channelMsg ChannelMessage
+	channelMsg.ChannelID = channelID
+
+	err := json.Unmarshal([]byte(funcArg.JsonValue), &channelMsg)
+	if err != nil {
+		log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
+		return "Unable to deserialize data", err
+	}
+
+	duration := time.Duration(channelMsg.TimerLength) * time.Second
+
+	log.Printf(
+		"attempting to send reminder on %s in %s\n",
+		channelMsg.ChannelID,
+		duration,
+	)
+
+	time.AfterFunc(
+		duration,
+		func() {
+			dg.ChannelMessageSend(channelMsg.ChannelID, channelMsg.Message)
+		},
+	)
+
+	state.threadMap[channelMsg.ChannelID].awaitsResponse = true
+
+	go waitForReminderResponse(
+		dg,
+		channelMsg.ChannelID,
+		channelMsg.UserID,
+		client,
+		state,
+	)
+
+	return "worked", nil
 }
 
 func waitForReminderResponse(
@@ -295,6 +473,7 @@ func waitForReminderResponse(
 			userID = "they"
 		}
 
+		// TODO: maybe add this to additional_instruction
 		message := fmt.Sprintf(
 			"It looks %s haven't responsed to this reminder can you generate a response nagging them about it. This is not a tool request.",
 			mention(userID),
@@ -305,7 +484,15 @@ func waitForReminderResponse(
 			Content: message,
 		}
 
-		getAndSendResponse(context.Background(), dg, channelID, messageReq, client, state)
+		getAndSendResponse(
+			context.Background(),
+			dg,
+			channelID,
+			messageReq,
+			DEFAULT_INSTRUCTIONS,
+			client,
+			state,
+		)
 	}
 
 }
@@ -374,7 +561,6 @@ func toggleMorningMsg(
 	return "worked"
 }
 
-// TODO: add context with cancel
 // TODO: group all timer calls into a common scheduler
 func startMorningMessageLoop(
 	ctx context.Context,
@@ -406,13 +592,45 @@ func startMorningMessageLoop(
 
 			log.Println("ticker expired sending morning message ...")
 
-			messageReq := openai.MessageRequest{
-				Role:    openai.ChatMessageRoleAssistant,
-				Content: "Please tell @here goodmorning. this is not a function call",
+			message := "Please tell everyone @here good morning."
+			for _, location := range morningMsgFuncArgs.WeatherLocations {
+				weather, err := getWeather(location)
+				if err != nil {
+					log.Printf("unable to get weather for %s: %s\n", location, err)
+					continue
+				}
+				message += location + ":" + weather
 			}
 
+			for _, stock := range morningMsgFuncArgs.Stocks {
+				stockPrice, err := getStockPrice(stock)
+				if err != nil {
+					log.Printf("unable to get weather for %s: %s\n", stock, err)
+					continue
+				}
+				message += stock + ":" + stockPrice
+			}
+
+			log.Println("getting morning message with prompt: ", message)
+
+			messageReq := openai.MessageRequest{
+				Role:    openai.ChatMessageRoleAssistant,
+				Content: message,
+			}
 			ctx = context.WithValue(ctx, DisableFunctions, true)
-			getAndSendResponse(ctx, dg, channelID, messageReq, client, state)
+
+			// reset the thread every morning
+			state.resetOpenAIThread(channelID, client)
+
+			getAndSendResponse(
+				ctx,
+				dg,
+				channelID,
+				messageReq,
+				MORNING_MESSAGE_INSTRUCTIONS,
+				client,
+				state,
+			)
 
 			if duration != 24*time.Hour {
 				duration = 24 * time.Hour

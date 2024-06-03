@@ -23,11 +23,27 @@ type State struct {
 	assistantID string
 }
 
+func (s *State) resetOpenAIThread(threadID string, client *openai.Client) error {
+	log.Println("Resetting thread...")
+	thread, err := client.CreateThread(context.Background(), openai.ThreadRequest{})
+	if err != nil {
+		return err
+	}
+
+	_, exists := s.threadMap[threadID]
+	if !exists {
+		s.threadMap[threadID] = &chatThread{}
+	}
+
+	s.threadMap[threadID].openAIThread = thread
+
+	return nil
+}
+
 type chatThread struct {
-	openAIThread           openai.Thread
-	additionalInstructions string
-	awaitsResponse         bool
-	// TODO: this is can be used across multiple things (morning message, rl tracker, etc)
+	openAIThread   openai.Thread
+	awaitsResponse bool
+	// TODO: this is can be used across multiple things ()
 	// should update this to use separate params
 	cancelFunc context.CancelFunc
 	// messages []string
@@ -51,6 +67,11 @@ const COMMENTATE_INSTRUCTIONS = `
 const DEFAULT_INSTRUCTIONS = `Try to be as helpful as possible while keeping the iconic skippy saracasm in your response.
   Use responses of varying lengths.
 `
+const MORNING_MESSAGE_INSTRUCTIONS = `
+You are making creating morning wake up message for the users of a discord server. Make sure to mention @here in your message. 
+Be creative in the message you create in wishing everyone good morning. If there is weather data included in the message please give a brief overview of the weather for each location.
+if there is stock price information included in the message include that information in the message.
+	`
 
 func RunDiscord(token string, client *openai.Client, assistantID string) {
 	var state *State = &State{
@@ -120,7 +141,7 @@ func handleSlashCommand(
 	if textOption == "start" {
 		log.Println("Handling rl_sesh start command. creating new thread")
 
-		thread, err := client.CreateThread(context.Background(), openai.ThreadRequest{})
+		err := state.resetOpenAIThread(i.ChannelID, client)
 		if err != nil {
 			log.Println("Unable to create thread: ", err)
 			err = dg.InteractionRespond(i.Interaction,
@@ -137,11 +158,7 @@ func handleSlashCommand(
 		}
 
 		ctx, cancelFunc := context.WithCancel(context.Background())
-		state.threadMap[i.ChannelID] = &chatThread{
-			openAIThread:           thread,
-			additionalInstructions: COMMENTATE_INSTRUCTIONS,
-			cancelFunc:             cancelFunc,
-		}
+		state.threadMap[i.ChannelID].cancelFunc = cancelFunc
 
 		message := "Started rocket league session"
 		filePath := os.Getenv("RL_DIR")
@@ -205,7 +222,15 @@ func messageCreate(
 				Role:    openai.ChatMessageRoleUser,
 				Content: m.Content,
 			}
-			getAndSendResponse(context.Background(), s, m.ChannelID, messageReq, client, state)
+			getAndSendResponse(
+				context.Background(),
+				s,
+				m.ChannelID,
+				messageReq,
+				DEFAULT_INSTRUCTIONS,
+				client,
+				state,
+			)
 		}
 		// value used by reminders to see if it needs to send another message to user
 		state.threadMap[m.ChannelID].awaitsResponse = false
@@ -228,17 +253,9 @@ func messageCreate(
 
 	log.Println("using message: ", message)
 
-	thread, err := client.CreateThread(context.Background(), openai.ThreadRequest{})
-
-	if err != nil {
-		log.Println("Unable to create thread: ", err)
-	}
-
 	if !threadExists {
-		state.threadMap[m.ChannelID] = &chatThread{
-			openAIThread:           thread,
-			additionalInstructions: DEFAULT_INSTRUCTIONS,
-		}
+		// TODO: handle err
+		state.resetOpenAIThread(m.ChannelID, client)
 	}
 
 	for _, attachment := range m.Attachments {
@@ -252,7 +269,15 @@ func messageCreate(
 		Role:    openai.ChatMessageRoleUser,
 		Content: message,
 	}
-	getAndSendResponse(context.Background(), s, m.ChannelID, messageReq, client, state)
+	getAndSendResponse(
+		context.Background(),
+		s,
+		m.ChannelID,
+		messageReq,
+		DEFAULT_INSTRUCTIONS,
+		client,
+		state,
+	)
 }
 
 func getAndSendResponse(
@@ -260,6 +285,7 @@ func getAndSendResponse(
 	dg *discordgo.Session,
 	channelID string,
 	messageReq openai.MessageRequest,
+	additionalInstructions string,
 	client *openai.Client,
 	state *State) {
 	dg.ChannelTyping(channelID)
@@ -278,7 +304,7 @@ func getAndSendResponse(
 		messageReq,
 		state,
 		client,
-		state.threadMap[channelID].additionalInstructions,
+		additionalInstructions,
 	)
 	if err != nil {
 		log.Println("Unable to get response: ", err)
