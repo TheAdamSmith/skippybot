@@ -473,6 +473,7 @@ func waitForReminderResponse(
 			userID = "they"
 		}
 
+		// TODO: maybe add this to additional_instruction
 		message := fmt.Sprintf(
 			"It looks %s haven't responsed to this reminder can you generate a response nagging them about it. This is not a tool request.",
 			mention(userID),
@@ -483,7 +484,15 @@ func waitForReminderResponse(
 			Content: message,
 		}
 
-		getAndSendResponse(context.Background(), dg, channelID, messageReq, client, state)
+		getAndSendResponse(
+			context.Background(),
+			dg,
+			channelID,
+			messageReq,
+			DEFAULT_INSTRUCTIONS,
+			client,
+			state,
+		)
 	}
 
 }
@@ -583,7 +592,7 @@ func startMorningMessageLoop(
 
 			log.Println("ticker expired sending morning message ...")
 
-			message := "Please tell everyone @here good morning. The data following this message is the weather and stock price information to include in the message. this is not a function call"
+			message := "Please tell everyone @here good morning."
 			for _, location := range morningMsgFuncArgs.WeatherLocations {
 				weather, err := getWeather(location)
 				if err != nil {
@@ -609,7 +618,19 @@ func startMorningMessageLoop(
 				Content: message,
 			}
 			ctx = context.WithValue(ctx, DisableFunctions, true)
-			getAndSendResponse(ctx, dg, channelID, messageReq, client, state)
+
+			// reset the thread every morning
+			state.resetOpenAIThread(channelID, client)
+
+			getAndSendResponse(
+				ctx,
+				dg,
+				channelID,
+				messageReq,
+				MORNING_MESSAGE_INSTRUCTIONS,
+				client,
+				state,
+			)
 
 			if duration != 24*time.Hour {
 				duration = 24 * time.Hour
