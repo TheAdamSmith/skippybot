@@ -1,4 +1,4 @@
-package discord
+package skippy
 
 import (
 	"context"
@@ -40,9 +40,20 @@ func (s *State) resetOpenAIThread(threadID string, client *openai.Client) error 
 	return nil
 }
 
+func (s *State) toggleAlwaysRespond(threadID string, client *openai.Client) bool {
+	_, threadExists := s.threadMap[threadID]
+	if !threadExists {
+		s.resetOpenAIThread(threadID, client)
+	}
+	updateVal := !s.threadMap[threadID].alwaysRespond
+	s.threadMap[threadID].alwaysRespond = updateVal
+	return updateVal
+}
+
 type chatThread struct {
 	openAIThread   openai.Thread
 	awaitsResponse bool
+	alwaysRespond  bool
 	// TODO: this is can be used across multiple things ()
 	// should update this to use separate params
 	cancelFunc context.CancelFunc
@@ -95,10 +106,23 @@ func RunDiscord(token string, client *openai.Client, assistantID string) {
 
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if i.Type == discordgo.InteractionApplicationCommand {
-			handleSlashCommand(s, i, client, state)
+			handleAlwaysRespond(s, i, client, state)
 		}
 	})
 
+	initSlashCommands(dg)
+
+	log.Println("Bot is now running. Press CTRL+C to exit.")
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, syscall.SIGTERM)
+	<-sc
+
+	dg.Close()
+}
+
+func initSlashCommands(dg *discordgo.Session) ([]*discordgo.ApplicationCommand, error) {
+
+	var commands []*discordgo.ApplicationCommand
 	command := discordgo.ApplicationCommand{
 		Name:        "skippy",
 		Description: "Control Skippy the Magnificent",
@@ -112,25 +136,82 @@ func RunDiscord(token string, client *openai.Client, assistantID string) {
 		},
 	}
 
-	_, err = dg.ApplicationCommandCreate(dg.State.User.ID, "", &command)
+	applicationCommand, err := dg.ApplicationCommandCreate(dg.State.User.ID, "", &command)
+	commands = append(commands, applicationCommand)
+
 	if err != nil {
-		log.Printf("Error creating application commands: %s\n", err)
+		log.Println("error creating application command: ", err)
 	}
 
-	log.Println("Bot is now running. Press CTRL+C to exit.")
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, syscall.SIGTERM)
-	<-sc
+	command = discordgo.ApplicationCommand{
+		Name:        "skippy_always_respond",
+		Description: "Toggle auto respond when on Skippy will always respond to messages in this channel",
+	}
 
-	dg.Close()
+	applicationCommand, err = dg.ApplicationCommandCreate(dg.State.User.ID, "", &command)
+	commands = append(commands, applicationCommand)
+
+	if err != nil {
+		log.Println("error creating application command: ", err)
+	}
+
+	return commands, err
 }
 
-func handleSlashCommand(
+func handleAlwaysRespond(
 	dg *discordgo.Session,
 	i *discordgo.InteractionCreate,
 	client *openai.Client,
 	state *State,
 ) {
+	log.Println(i.ApplicationCommandData().Name)
+	switch i.ApplicationCommandData().Name {
+	case "skippy":
+		handleSkippyCommand(dg, i, client, state)
+	case "skippy_always_respond", "skippy_auto_respond":
+		enabled := state.toggleAlwaysRespond(i.ChannelID, client)
+		var message string
+		if enabled {
+			message = "Turned on always respond"
+		} else {
+			message = "Turned off always respond"
+		}
+		err := dg.InteractionRespond(i.Interaction,
+			&discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: message,
+				},
+			})
+		if err != nil {
+			log.Printf("Error responding to slash command: %s\n", err)
+		}
+
+	default:
+		log.Println("recieved unrecognized command")
+		err := dg.InteractionRespond(i.Interaction,
+			&discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "Recieved unrecognized command",
+				},
+			})
+		if err != nil {
+			log.Printf("Error responding to slash command: %s\n", err)
+		}
+	}
+
+}
+
+// TODO: this is old and should be deprecieated
+// change to seperate rocket league commands
+func handleSkippyCommand(
+	dg *discordgo.Session,
+	i *discordgo.InteractionCreate,
+	client *openai.Client,
+	state *State,
+) {
+
 	if i.ApplicationCommandData().Name != "skippy" {
 		return
 	}
@@ -200,8 +281,8 @@ func handleSlashCommand(
 			log.Printf("Error responding to slash command: %s\n", err)
 		}
 	}
-}
 
+}
 func messageCreate(
 	s *discordgo.Session,
 	m *discordgo.MessageCreate,
@@ -212,6 +293,7 @@ func messageCreate(
 	if m.Author.ID == s.State.User.ID {
 		return
 	}
+
 	log.Printf("Recieved Message: %s\n", m.Content)
 
 	_, threadExists := state.threadMap[m.ChannelID]
@@ -237,8 +319,11 @@ func messageCreate(
 	}
 
 	role, roleMentioned := isRoleMentioned(s, m)
+
+	isMentioned := isMentioned(m.Mentions, s.State.User) || roleMentioned
+	alwaysRespond := threadExists && state.threadMap[m.ChannelID].alwaysRespond
 	// Check if the bot is mentioned
-	if !(isMentioned(m.Mentions, s.State.User) || roleMentioned) {
+	if !isMentioned && !alwaysRespond {
 		return
 	}
 
@@ -254,16 +339,12 @@ func messageCreate(
 	log.Println("using message: ", message)
 
 	if !threadExists {
-		// TODO: handle err
-		state.resetOpenAIThread(m.ChannelID, client)
+		err := state.resetOpenAIThread(m.ChannelID, client)
+		if err != nil {
+			log.Println("Unable to reset thread: ", err)
+		}
 	}
 
-	for _, attachment := range m.Attachments {
-		log.Println("Attachment url: ", attachment.URL)
-		// downloadAttachment(attachment.URL, fmt.Sprint(rand.Int()) + ".jpg")
-		message += " " + removeQuery(attachment.URL)
-
-	}
 	log.Println("CHANELLID: ", m.ChannelID)
 	messageReq := openai.MessageRequest{
 		Role:    openai.ChatMessageRoleUser,
@@ -311,7 +392,10 @@ func getAndSendResponse(
 		response = "Oh no! Something went wrong."
 	}
 
-	dg.ChannelMessageSend(channelID, response)
+	_, err = dg.ChannelMessageSend(channelID, response)
+	if err != nil {
+		log.Printf("Could not send discord message on channel %s: %s\n", channelID, err)
+	}
 }
 
 func removeQuery(url string) string {

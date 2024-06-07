@@ -1,4 +1,4 @@
-package discord
+package skippy
 
 import (
 	"context"
@@ -79,6 +79,7 @@ func GetResponse(
 	_, err := client.CreateMessage(ctx, threadID, messageReq)
 	if err != nil {
 		log.Println("Unable to create message", err)
+		return "", err
 	}
 
 	runReq := openai.RunRequest{

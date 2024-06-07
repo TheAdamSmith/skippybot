@@ -1,4 +1,4 @@
-package discord
+package skippy
 
 import (
 	"encoding/json"
