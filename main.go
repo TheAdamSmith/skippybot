@@ -6,7 +6,7 @@ import (
 
 	"github.com/joho/godotenv"
 
-	discord "skippybot/discord"
+	skippy "skippybot/skippy"
 
 	openai "github.com/sashabaranov/go-openai"
 )
@@ -39,5 +39,5 @@ func main() {
 	clientConfig.AssistantVersion = "v2"
 	client := openai.NewClientWithConfig(clientConfig)
 
-	discord.RunDiscord(token, client, assistantID)
+	skippy.RunDiscord(token, client, assistantID)
 }

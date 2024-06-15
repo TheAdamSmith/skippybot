@@ -61,15 +61,6 @@ type chatThread struct {
 	// reponses []string
 }
 
-// used for sending a message on a specific discord channel
-type ChannelMessage struct {
-	Message     string `json:"message"`
-	TimerLength int    `json:"timer_length,omitempty"`
-	ChannelID   string `json:"channel_id,omitempty"`
-	UserID      string `json:"user_id,omitempty"`
-	IsReminder  bool   `json:"is_reminder,omitempty"`
-}
-
 const COMMENTATE_INSTRUCTIONS = `
     Messages will be sent in this thread that will contain the json results of a rocket league game.
     Announce the overall score and commentate on the performance of the home team. Come up with creative insults on their performance, but praise high performers
@@ -83,6 +74,16 @@ You are making creating morning wake up message for the users of a discord serve
 Be creative in the message you create in wishing everyone good morning. If there is weather data included in the message please give a brief overview of the weather for each location.
 if there is stock price information included in the message include that information in the message.
 	`
+
+const SEND_CHANNEL_MSG_INSTRUCTIONS = `You are generating a message to send in a discord channel. Generate a message based on the prompt.
+	If a user id is provided use it in your message.
+`
+
+const (
+	RL_SESH        = "rl_sesh"
+	ALWAYS_RESPOND = "always_respond"
+	SEND_MESSAGE   = "send_message"
+)
 
 func RunDiscord(token string, client *openai.Client, assistantID string) {
 	var state *State = &State{
@@ -106,10 +107,11 @@ func RunDiscord(token string, client *openai.Client, assistantID string) {
 
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if i.Type == discordgo.InteractionApplicationCommand {
-			handleAlwaysRespond(s, i, client, state)
+			onCommand(s, i, client, state)
 		}
 	})
 
+	// deleteSlashCommands(dg)
 	initSlashCommands(dg)
 
 	log.Println("Bot is now running. Press CTRL+C to exit.")
@@ -120,17 +122,47 @@ func RunDiscord(token string, client *openai.Client, assistantID string) {
 	dg.Close()
 }
 
-func initSlashCommands(dg *discordgo.Session) ([]*discordgo.ApplicationCommand, error) {
+func deleteSlashCommands(dg *discordgo.Session) error {
+	appCommands, err := dg.ApplicationCommands(dg.State.Application.ID, "")
+	if err != nil {
+		log.Println("Could not get application commands: ", err)
+		return fmt.Errorf(
+			"could not get application commands:%s",
+			err,
+		)
+	}
 
+	for _, appCommand := range appCommands {
+		err = dg.ApplicationCommandDelete(dg.State.Application.ID, "", appCommand.ID)
+		if err != nil {
+			log.Println("Could not delete command", err)
+			return err
+		}
+	}
+	return nil
+}
+func initSlashCommands(dg *discordgo.Session) ([]*discordgo.ApplicationCommand, error) {
 	var commands []*discordgo.ApplicationCommand
 	command := discordgo.ApplicationCommand{
-		Name:        "skippy",
-		Description: "Control Skippy the Magnificent",
+		Name:        "send_message",
+		Description: "Have the bot send a message",
 		Options: []*discordgo.ApplicationCommandOption{
 			{
+				Type:        discordgo.ApplicationCommandOptionChannel,
+				Name:        "channel",
+				Description: "channel to send message on",
+				Required:    true,
+			},
+			{
 				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        "rl_sesh",
-				Description: "Start or Stop a rocket league session",
+				Name:        "message",
+				Description: "message to send",
+				Required:    true,
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionMentionable,
+				Name:        "mention",
+				Description: "anyone to mention",
 				Required:    false,
 			},
 		},
@@ -144,7 +176,7 @@ func initSlashCommands(dg *discordgo.Session) ([]*discordgo.ApplicationCommand, 
 	}
 
 	command = discordgo.ApplicationCommand{
-		Name:        "skippy_always_respond",
+		Name:        "always_respond",
 		Description: "Toggle auto respond when on Skippy will always respond to messages in this channel",
 	}
 
@@ -155,10 +187,29 @@ func initSlashCommands(dg *discordgo.Session) ([]*discordgo.ApplicationCommand, 
 		log.Println("error creating application command: ", err)
 	}
 
+	command = discordgo.ApplicationCommand{
+		Name:        "rl_sesh",
+		Description: "start/stop rl sesh",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "startorstop",
+				Description: "should be either start or stop",
+				Required:    false,
+			},
+		},
+	}
+
+	applicationCommand, err = dg.ApplicationCommandCreate(dg.State.User.ID, "", &command)
+	commands = append(commands, applicationCommand)
+	if err != nil {
+		log.Println("error creating application command: ", err)
+	}
+
 	return commands, err
 }
 
-func handleAlwaysRespond(
+func onCommand(
 	dg *discordgo.Session,
 	i *discordgo.InteractionCreate,
 	client *openai.Client,
@@ -166,27 +217,12 @@ func handleAlwaysRespond(
 ) {
 	log.Println(i.ApplicationCommandData().Name)
 	switch i.ApplicationCommandData().Name {
-	case "skippy":
-		handleSkippyCommand(dg, i, client, state)
-	case "skippy_always_respond", "skippy_auto_respond":
-		enabled := state.toggleAlwaysRespond(i.ChannelID, client)
-		var message string
-		if enabled {
-			message = "Turned on always respond"
-		} else {
-			message = "Turned off always respond"
-		}
-		err := dg.InteractionRespond(i.Interaction,
-			&discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Content: message,
-				},
-			})
-		if err != nil {
-			log.Printf("Error responding to slash command: %s\n", err)
-		}
-
+	case RL_SESH:
+		handleRLSesh(dg, i, client, state)
+	case ALWAYS_RESPOND:
+		handleAlwaysRespond(dg, i, client, state)
+	case SEND_MESSAGE:
+		sendChannelMessage(dg, i, client, state)
 	default:
 		log.Println("recieved unrecognized command")
 		err := dg.InteractionRespond(i.Interaction,
@@ -194,6 +230,7 @@ func handleAlwaysRespond(
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
 					Content: "Recieved unrecognized command",
+					Flags:   discordgo.MessageFlagsEphemeral,
 				},
 			})
 		if err != nil {
@@ -203,16 +240,100 @@ func handleAlwaysRespond(
 
 }
 
-// TODO: this is old and should be deprecieated
-// change to seperate rocket league commands
-func handleSkippyCommand(
+func sendChannelMessage(
+	dg *discordgo.Session,
+	i *discordgo.InteractionCreate,
+	client *openai.Client,
+	state *State,
+) error {
+	options := i.ApplicationCommandData().Options
+	if len(options) < 2 {
+		return fmt.Errorf("recieved an incorrect amount of options")
+	}
+
+	channel := options[0].ChannelValue(nil)
+	channelID := channel.ID
+
+	prompt := options[1].StringValue()
+	var mentionString string
+
+	if len(options) > 2 {
+		mention := options[2].UserValue(nil)
+		mentionString = mention.Mention()
+		log.Println(mentionString)
+	}
+
+	message := "prompt: " + prompt + "\n"
+	if mentionString != "" {
+		message += "User ID :" + mentionString
+	}
+
+	messageReq := openai.MessageRequest{
+		Role:    openai.ChatMessageRoleUser,
+		Content: message,
+	}
+
+	ctx := context.WithValue(context.Background(), DisableFunctions, true)
+
+	go getAndSendResponse(
+		ctx,
+		dg,
+		channelID,
+		messageReq,
+		SEND_CHANNEL_MSG_INSTRUCTIONS,
+		client,
+		state,
+	)
+
+	err := dg.InteractionRespond(i.Interaction,
+		&discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "Sent the message",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+	if err != nil {
+		log.Printf("Error responding to slash command: %s\n", err)
+		return err
+	}
+
+	return nil
+}
+
+func handleAlwaysRespond(
+	dg *discordgo.Session,
+	i *discordgo.InteractionCreate,
+	client *openai.Client,
+	state *State,
+) {
+	enabled := state.toggleAlwaysRespond(i.ChannelID, client)
+	var message string
+	if enabled {
+		message = "Turned on always respond"
+	} else {
+		message = "Turned off always respond"
+	}
+	err := dg.InteractionRespond(i.Interaction,
+		&discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: message,
+			},
+		})
+	if err != nil {
+		log.Printf("Error responding to slash command: %s\n", err)
+	}
+}
+
+func handleRLSesh(
 	dg *discordgo.Session,
 	i *discordgo.InteractionCreate,
 	client *openai.Client,
 	state *State,
 ) {
 
-	if i.ApplicationCommandData().Name != "skippy" {
+	if i.ApplicationCommandData().Name != "rl_sesh" {
 		return
 	}
 
@@ -283,6 +404,7 @@ func handleSkippyCommand(
 	}
 
 }
+
 func messageCreate(
 	s *discordgo.Session,
 	m *discordgo.MessageCreate,
@@ -376,6 +498,10 @@ func getAndSendResponse(
 	log.Println("Attempting to get response...")
 
 	ctx = context.WithValue(ctx, DGChannelID, channelID)
+	_, exists := state.threadMap[channelID]
+	if !exists {
+		state.resetOpenAIThread(channelID, client)
+	}
 	ctx = context.WithValue(ctx, ThreadID, state.threadMap[channelID].openAIThread.ID)
 	ctx = context.WithValue(ctx, AssistantID, state.assistantID)
 

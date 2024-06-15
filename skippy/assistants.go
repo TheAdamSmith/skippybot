@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -47,6 +48,13 @@ type MorningMsgFuncArgs struct {
 	Stocks           []string `json:"stocks,omitempty"`
 }
 
+// used for
+type ReminderFuncArgs struct {
+	Message     string `json:"message"`
+	TimerLength int    `json:"timer_length,omitempty"`
+	UserID      string `json:"user_id,omitempty"`
+}
+
 func GetResponse(
 	ctx context.Context,
 	dg *discordgo.Session,
@@ -55,7 +63,6 @@ func GetResponse(
 	client *openai.Client,
 	additionalInstructions string,
 ) (string, error) {
-
 	threadID, ok := ctx.Value(ThreadID).(string)
 	if !ok {
 		return "", fmt.Errorf("could not find context value: %s", string(ThreadID))
@@ -214,7 +221,6 @@ func handleRequiresAction(
 				toolOutputs,
 				openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: output},
 			)
-
 		case SetReminder:
 			log.Println("set_reminder()")
 			output, err := setReminder(context.Background(), dg, funcArg, dgChannID, client, state)
@@ -225,18 +231,6 @@ func handleRequiresAction(
 				toolOutputs,
 				openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: output},
 			)
-
-		case SendChannelMessage:
-			log.Println("send_channel_message()")
-			output, err := sendChannelMessage(context.Background(), dg, funcArg, client, state)
-			if err != nil {
-				log.Println("error sending channel message: ", err)
-			}
-			toolOutputs = append(
-				toolOutputs,
-				openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: output},
-			)
-
 		case ToggleMorningMessage:
 			log.Println("toggle_morning_message()")
 			output, err := handleMorningMessage(dg, funcArg, dgChannID, client, state)
@@ -371,30 +365,6 @@ func getAndSendImage(
 	return "image generated", nil
 }
 
-func sendChannelMessage(
-	ctx context.Context,
-	dg *discordgo.Session,
-	funcArg FuncArgs,
-	client *openai.Client,
-	state *State,
-) (string, error) {
-	var channelMsg ChannelMessage
-	err := json.Unmarshal([]byte(funcArg.JsonValue), &channelMsg)
-	if err != nil {
-		log.Println("Could not unmarshal func args: ", string(funcArg.JsonValue))
-		return "Unable to deserialize data", err
-	}
-
-	log.Println("attempting to send message on: ", channelMsg.ChannelID)
-	_, err = dg.ChannelMessageSend(channelMsg.ChannelID, channelMsg.Message)
-	if err != nil {
-		log.Println("Unable to send message on channelMsg.channelID: ", err)
-		return "Unable to send message", err
-	}
-	return "sent!", nil
-
-}
-
 func setReminder(
 	ctx context.Context,
 	dg *discordgo.Session,
@@ -404,8 +374,7 @@ func setReminder(
 	state *State,
 ) (string, error) {
 
-	var channelMsg ChannelMessage
-	channelMsg.ChannelID = channelID
+	var channelMsg ReminderFuncArgs
 
 	err := json.Unmarshal([]byte(funcArg.JsonValue), &channelMsg)
 	if err != nil {
@@ -417,22 +386,22 @@ func setReminder(
 
 	log.Printf(
 		"attempting to send reminder on %s in %s\n",
-		channelMsg.ChannelID,
+		channelID,
 		duration,
 	)
 
 	time.AfterFunc(
 		duration,
 		func() {
-			dg.ChannelMessageSend(channelMsg.ChannelID, channelMsg.Message)
+			dg.ChannelMessageSend(channelID, channelMsg.Message)
 		},
 	)
 
-	state.threadMap[channelMsg.ChannelID].awaitsResponse = true
+	state.threadMap[channelID].awaitsResponse = true
 
 	go waitForReminderResponse(
 		dg,
-		channelMsg.ChannelID,
+		channelID,
 		channelMsg.UserID,
 		client,
 		state,
@@ -450,7 +419,7 @@ func waitForReminderResponse(
 ) {
 
 	maxRemind := 5
-	timeoutMin := 2 * time.Minute
+	timeoutMin := 20 * time.Second
 	timer := time.NewTimer(timeoutMin)
 
 	reminds := 0
@@ -499,6 +468,9 @@ func waitForReminderResponse(
 }
 
 func mention(userID string) string {
+	if strings.HasPrefix(userID, "<@") && strings.HasSuffix(userID, ">") {
+		return userID
+	}
 	return fmt.Sprint("<@%s>", userID)
 }
 
