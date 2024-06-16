@@ -1,1 +1,5 @@
 .env
+skippybot
+.air.toml
+tmp/main
+tmp
