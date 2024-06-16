@@ -39,5 +39,10 @@ func main() {
 	clientConfig.AssistantVersion = "v2"
 	client := openai.NewClientWithConfig(clientConfig)
 
-	skippy.RunDiscord(token, client, assistantID)
+	log.Println("Connecting to db")
+	db, err := skippy.NewDB("sqlite", "skippy.db")
+	if err != nil {
+		log.Fatalln("Unable to get database connection", err)
+	}
+	skippy.RunDiscord(token, assistantID, client, db)
 }

@@ -31,7 +31,7 @@ const SEND_CHANNEL_MSG_INSTRUCTIONS = `You are generating a message to send in a
 	If a user id is provided use it in your message.
 `
 
-func RunDiscord(token string, client *openai.Client, assistantID string) {
+func RunDiscord(token string, assistantID string, client *openai.Client, db Database) {
 	state := NewState(assistantID)
 
 	dg, err := discordgo.New("Bot " + token)
@@ -62,7 +62,7 @@ func RunDiscord(token string, client *openai.Client, assistantID string) {
 	})
 
 	dg.AddHandler(func(dg *discordgo.Session, p *discordgo.PresenceUpdate) {
-		onPresenceUpdate(dg, p, state)
+		onPresenceUpdate(dg, p, state, db)
 	})
 
 	// deleteSlashCommands(dg)
@@ -193,7 +193,7 @@ func getAndSendResponse(
 	}
 }
 
-func onPresenceUpdate(dg *discordgo.Session, p *discordgo.PresenceUpdate, s *State) {
+func onPresenceUpdate(dg *discordgo.Session, p *discordgo.PresenceUpdate, s *State, db Database) {
 	game, isPlayingGame := getCurrentGame(p)
 	userPresence, exists := s.getPresence(p.User.ID)
 
@@ -211,7 +211,33 @@ func onPresenceUpdate(dg *discordgo.Session, p *discordgo.PresenceUpdate, s *Sta
 
 	if stoppedPlaying {
 		duration := time.Since(userPresence.timeStarted)
-		log.Printf("User %s stopped playing game %s, after %s\n", member.User.Username, userPresence.game, duration)
+		userSession := &GameSession{
+			UserID:    p.User.ID,
+			Game:      userPresence.game,
+			StartedAt: userPresence.timeStarted,
+			Duration:  duration,
+		}
+
+		err = db.CreateGameSession(userSession)
+		if err != nil {
+			log.Println("Unable to create game session: ", err)
+		}
+		log.Println("ID: ", userSession.ID)
+		sessions, err := db.GetGameSessionsByUser(p.User.ID)
+		if err != nil {
+			log.Println("Unable to get game sessions: ", err)
+		}
+
+		for _, session := range sessions {
+			log.Println("Session: ", session)
+		}
+
+		log.Printf(
+			"User %s stopped playing game %s, after %s\n",
+			member.User.Username,
+			userPresence.game,
+			duration,
+		)
 		s.updatePresence(p.User.ID, p.Status, isPlayingGame, "", time.Time{})
 	}
 
