@@ -18,49 +18,6 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-type State struct {
-	threadMap   map[string]*chatThread
-	assistantID string
-}
-
-func (s *State) resetOpenAIThread(threadID string, client *openai.Client) error {
-	log.Println("Resetting thread...")
-	thread, err := client.CreateThread(context.Background(), openai.ThreadRequest{})
-	if err != nil {
-		return err
-	}
-
-	_, exists := s.threadMap[threadID]
-	if !exists {
-		s.threadMap[threadID] = &chatThread{}
-	}
-
-	s.threadMap[threadID].openAIThread = thread
-
-	return nil
-}
-
-func (s *State) toggleAlwaysRespond(threadID string, client *openai.Client) bool {
-	_, threadExists := s.threadMap[threadID]
-	if !threadExists {
-		s.resetOpenAIThread(threadID, client)
-	}
-	updateVal := !s.threadMap[threadID].alwaysRespond
-	s.threadMap[threadID].alwaysRespond = updateVal
-	return updateVal
-}
-
-type chatThread struct {
-	openAIThread   openai.Thread
-	awaitsResponse bool
-	alwaysRespond  bool
-	// TODO: this is can be used across multiple things ()
-	// should update this to use separate params
-	cancelFunc context.CancelFunc
-	// messages []string
-	// reponses []string
-}
-
 const COMMENTATE_INSTRUCTIONS = `
     Messages will be sent in this thread that will contain the json results of a rocket league game.
     Announce the overall score and commentate on the performance of the home team. Come up with creative insults on their performance, but praise high performers
@@ -86,20 +43,24 @@ const (
 )
 
 func RunDiscord(token string, client *openai.Client, assistantID string) {
-	var state *State = &State{
-		threadMap:   make(map[string]*chatThread),
-		assistantID: assistantID,
-	}
+	state := NewState(assistantID)
 
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
 		log.Fatalln("Unable to get discord client")
 	}
 
+	dg.Identify.Intents = discordgo.IntentGuildPresences | discordgo.IntentGuilds
+
 	err = dg.Open()
 	if err != nil {
 		log.Fatalln("Unable to open discord client", err.Error())
 	}
+	defer dg.Close()
+
+	dg.State.TrackPresences = true
+	dg.State.TrackChannels = true
+	dg.State.TrackMembers = true
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
 		messageCreate(s, m, client, state)
@@ -111,6 +72,10 @@ func RunDiscord(token string, client *openai.Client, assistantID string) {
 		}
 	})
 
+	dg.AddHandler(func(dg *discordgo.Session, p *discordgo.PresenceUpdate) {
+		onPresenceUpdate(dg, p, state)
+	})
+
 	// deleteSlashCommands(dg)
 	initSlashCommands(dg)
 
@@ -118,8 +83,39 @@ func RunDiscord(token string, client *openai.Client, assistantID string) {
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, syscall.SIGTERM)
 	<-sc
+}
 
-	dg.Close()
+func onPresenceUpdate(dg *discordgo.Session, p *discordgo.PresenceUpdate, s *State) {
+	game, isPlayingGame := getCurrentGame(p)
+	userPresence, exists := s.getPresence(p.User.ID)
+
+	member, err := dg.State.Member(p.GuildID, p.User.ID)
+	if err != nil {
+		log.Println("Could not get user: ", err)
+	}
+	startedPlaying := isPlayingGame && (!exists || exists && !userPresence.isPlayingGame)
+	stoppedPlaying := exists && userPresence.isPlayingGame && !isPlayingGame
+
+	if startedPlaying {
+		log.Printf("User %s started playing %s\n", member.User.Username, game)
+		s.updatePresence(p.User.ID, p.Status, isPlayingGame, game, time.Now())
+	}
+
+	if stoppedPlaying {
+		duration := time.Since(userPresence.timeStarted)
+		log.Printf("User %s stopped playing game %s, after %s\n", member.User.Username, userPresence.game, duration)
+		s.updatePresence(p.User.ID, p.Status, isPlayingGame, "", time.Time{})
+	}
+
+}
+
+func getCurrentGame(p *discordgo.PresenceUpdate) (string, bool) {
+	for _, activity := range p.Activities {
+		if activity.Type == discordgo.ActivityTypeGame {
+			return activity.Name, true
+		}
+	}
+	return "", false
 }
 
 func deleteSlashCommands(dg *discordgo.Session) error {
@@ -141,6 +137,7 @@ func deleteSlashCommands(dg *discordgo.Session) error {
 	}
 	return nil
 }
+
 func initSlashCommands(dg *discordgo.Session) ([]*discordgo.ApplicationCommand, error) {
 	var commands []*discordgo.ApplicationCommand
 	command := discordgo.ApplicationCommand{
