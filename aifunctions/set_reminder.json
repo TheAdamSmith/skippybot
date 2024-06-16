@@ -1,6 +1,6 @@
 {
   "name": "set_reminder",
-  "description": "Send a message with a timer",
+  "description": "Send a message with a timer. If a user id is present be sure to include it in the message",
   "parameters": {
     "type": "object",
     "properties": {

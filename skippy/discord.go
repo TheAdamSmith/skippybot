@@ -1,4 +1,4 @@
-package discord
+package skippy
 
 import (
 	"context"
@@ -40,23 +40,25 @@ func (s *State) resetOpenAIThread(threadID string, client *openai.Client) error 
 	return nil
 }
 
+func (s *State) toggleAlwaysRespond(threadID string, client *openai.Client) bool {
+	_, threadExists := s.threadMap[threadID]
+	if !threadExists {
+		s.resetOpenAIThread(threadID, client)
+	}
+	updateVal := !s.threadMap[threadID].alwaysRespond
+	s.threadMap[threadID].alwaysRespond = updateVal
+	return updateVal
+}
+
 type chatThread struct {
 	openAIThread   openai.Thread
 	awaitsResponse bool
+	alwaysRespond  bool
 	// TODO: this is can be used across multiple things ()
 	// should update this to use separate params
 	cancelFunc context.CancelFunc
 	// messages []string
 	// reponses []string
-}
-
-// used for sending a message on a specific discord channel
-type ChannelMessage struct {
-	Message     string `json:"message"`
-	TimerLength int    `json:"timer_length,omitempty"`
-	ChannelID   string `json:"channel_id,omitempty"`
-	UserID      string `json:"user_id,omitempty"`
-	IsReminder  bool   `json:"is_reminder,omitempty"`
 }
 
 const COMMENTATE_INSTRUCTIONS = `
@@ -72,6 +74,16 @@ You are making creating morning wake up message for the users of a discord serve
 Be creative in the message you create in wishing everyone good morning. If there is weather data included in the message please give a brief overview of the weather for each location.
 if there is stock price information included in the message include that information in the message.
 	`
+
+const SEND_CHANNEL_MSG_INSTRUCTIONS = `You are generating a message to send in a discord channel. Generate a message based on the prompt.
+	If a user id is provided use it in your message.
+`
+
+const (
+	RL_SESH        = "rl_sesh"
+	ALWAYS_RESPOND = "always_respond"
+	SEND_MESSAGE   = "send_message"
+)
 
 func RunDiscord(token string, client *openai.Client, assistantID string) {
 	var state *State = &State{
@@ -95,27 +107,12 @@ func RunDiscord(token string, client *openai.Client, assistantID string) {
 
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if i.Type == discordgo.InteractionApplicationCommand {
-			handleSlashCommand(s, i, client, state)
+			onCommand(s, i, client, state)
 		}
 	})
 
-	command := discordgo.ApplicationCommand{
-		Name:        "skippy",
-		Description: "Control Skippy the Magnificent",
-		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        "rl_sesh",
-				Description: "Start or Stop a rocket league session",
-				Required:    false,
-			},
-		},
-	}
-
-	_, err = dg.ApplicationCommandCreate(dg.State.User.ID, "", &command)
-	if err != nil {
-		log.Printf("Error creating application commands: %s\n", err)
-	}
+	// deleteSlashCommands(dg)
+	initSlashCommands(dg)
 
 	log.Println("Bot is now running. Press CTRL+C to exit.")
 	sc := make(chan os.Signal, 1)
@@ -125,13 +122,218 @@ func RunDiscord(token string, client *openai.Client, assistantID string) {
 	dg.Close()
 }
 
-func handleSlashCommand(
+func deleteSlashCommands(dg *discordgo.Session) error {
+	appCommands, err := dg.ApplicationCommands(dg.State.Application.ID, "")
+	if err != nil {
+		log.Println("Could not get application commands: ", err)
+		return fmt.Errorf(
+			"could not get application commands:%s",
+			err,
+		)
+	}
+
+	for _, appCommand := range appCommands {
+		err = dg.ApplicationCommandDelete(dg.State.Application.ID, "", appCommand.ID)
+		if err != nil {
+			log.Println("Could not delete command", err)
+			return err
+		}
+	}
+	return nil
+}
+func initSlashCommands(dg *discordgo.Session) ([]*discordgo.ApplicationCommand, error) {
+	var commands []*discordgo.ApplicationCommand
+	command := discordgo.ApplicationCommand{
+		Name:        "send_message",
+		Description: "Have the bot send a message",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionChannel,
+				Name:        "channel",
+				Description: "channel to send message on",
+				Required:    true,
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "message",
+				Description: "message to send",
+				Required:    true,
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionMentionable,
+				Name:        "mention",
+				Description: "anyone to mention",
+				Required:    false,
+			},
+		},
+	}
+
+	applicationCommand, err := dg.ApplicationCommandCreate(dg.State.User.ID, "", &command)
+	commands = append(commands, applicationCommand)
+
+	if err != nil {
+		log.Println("error creating application command: ", err)
+	}
+
+	command = discordgo.ApplicationCommand{
+		Name:        "always_respond",
+		Description: "Toggle auto respond when on Skippy will always respond to messages in this channel",
+	}
+
+	applicationCommand, err = dg.ApplicationCommandCreate(dg.State.User.ID, "", &command)
+	commands = append(commands, applicationCommand)
+
+	if err != nil {
+		log.Println("error creating application command: ", err)
+	}
+
+	command = discordgo.ApplicationCommand{
+		Name:        "rl_sesh",
+		Description: "start/stop rl sesh",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "startorstop",
+				Description: "should be either start or stop",
+				Required:    false,
+			},
+		},
+	}
+
+	applicationCommand, err = dg.ApplicationCommandCreate(dg.State.User.ID, "", &command)
+	commands = append(commands, applicationCommand)
+	if err != nil {
+		log.Println("error creating application command: ", err)
+	}
+
+	return commands, err
+}
+
+func onCommand(
 	dg *discordgo.Session,
 	i *discordgo.InteractionCreate,
 	client *openai.Client,
 	state *State,
 ) {
-	if i.ApplicationCommandData().Name != "skippy" {
+	log.Println(i.ApplicationCommandData().Name)
+	switch i.ApplicationCommandData().Name {
+	case RL_SESH:
+		handleRLSesh(dg, i, client, state)
+	case ALWAYS_RESPOND:
+		handleAlwaysRespond(dg, i, client, state)
+	case SEND_MESSAGE:
+		sendChannelMessage(dg, i, client, state)
+	default:
+		log.Println("recieved unrecognized command")
+		err := dg.InteractionRespond(i.Interaction,
+			&discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "Recieved unrecognized command",
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			})
+		if err != nil {
+			log.Printf("Error responding to slash command: %s\n", err)
+		}
+	}
+
+}
+
+func sendChannelMessage(
+	dg *discordgo.Session,
+	i *discordgo.InteractionCreate,
+	client *openai.Client,
+	state *State,
+) error {
+	options := i.ApplicationCommandData().Options
+	if len(options) < 2 {
+		return fmt.Errorf("recieved an incorrect amount of options")
+	}
+
+	channel := options[0].ChannelValue(nil)
+	channelID := channel.ID
+
+	prompt := options[1].StringValue()
+	var mentionString string
+
+	if len(options) > 2 {
+		mention := options[2].UserValue(nil)
+		mentionString = mention.Mention()
+		log.Println(mentionString)
+	}
+
+	message := "prompt: " + prompt + "\n"
+	if mentionString != "" {
+		message += "User ID :" + mentionString
+	}
+
+	messageReq := openai.MessageRequest{
+		Role:    openai.ChatMessageRoleUser,
+		Content: message,
+	}
+
+	ctx := context.WithValue(context.Background(), DisableFunctions, true)
+
+	go getAndSendResponse(
+		ctx,
+		dg,
+		channelID,
+		messageReq,
+		SEND_CHANNEL_MSG_INSTRUCTIONS,
+		client,
+		state,
+	)
+
+	err := dg.InteractionRespond(i.Interaction,
+		&discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "Sent the message",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+	if err != nil {
+		log.Printf("Error responding to slash command: %s\n", err)
+		return err
+	}
+
+	return nil
+}
+
+func handleAlwaysRespond(
+	dg *discordgo.Session,
+	i *discordgo.InteractionCreate,
+	client *openai.Client,
+	state *State,
+) {
+	enabled := state.toggleAlwaysRespond(i.ChannelID, client)
+	var message string
+	if enabled {
+		message = "Turned on always respond"
+	} else {
+		message = "Turned off always respond"
+	}
+	err := dg.InteractionRespond(i.Interaction,
+		&discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: message,
+			},
+		})
+	if err != nil {
+		log.Printf("Error responding to slash command: %s\n", err)
+	}
+}
+
+func handleRLSesh(
+	dg *discordgo.Session,
+	i *discordgo.InteractionCreate,
+	client *openai.Client,
+	state *State,
+) {
+
+	if i.ApplicationCommandData().Name != "rl_sesh" {
 		return
 	}
 
@@ -200,6 +402,7 @@ func handleSlashCommand(
 			log.Printf("Error responding to slash command: %s\n", err)
 		}
 	}
+
 }
 
 func messageCreate(
@@ -212,6 +415,7 @@ func messageCreate(
 	if m.Author.ID == s.State.User.ID {
 		return
 	}
+
 	log.Printf("Recieved Message: %s\n", m.Content)
 
 	_, threadExists := state.threadMap[m.ChannelID]
@@ -237,8 +441,11 @@ func messageCreate(
 	}
 
 	role, roleMentioned := isRoleMentioned(s, m)
+
+	isMentioned := isMentioned(m.Mentions, s.State.User) || roleMentioned
+	alwaysRespond := threadExists && state.threadMap[m.ChannelID].alwaysRespond
 	// Check if the bot is mentioned
-	if !(isMentioned(m.Mentions, s.State.User) || roleMentioned) {
+	if !isMentioned && !alwaysRespond {
 		return
 	}
 
@@ -254,16 +461,12 @@ func messageCreate(
 	log.Println("using message: ", message)
 
 	if !threadExists {
-		// TODO: handle err
-		state.resetOpenAIThread(m.ChannelID, client)
+		err := state.resetOpenAIThread(m.ChannelID, client)
+		if err != nil {
+			log.Println("Unable to reset thread: ", err)
+		}
 	}
 
-	for _, attachment := range m.Attachments {
-		log.Println("Attachment url: ", attachment.URL)
-		// downloadAttachment(attachment.URL, fmt.Sprint(rand.Int()) + ".jpg")
-		message += " " + removeQuery(attachment.URL)
-
-	}
 	log.Println("CHANELLID: ", m.ChannelID)
 	messageReq := openai.MessageRequest{
 		Role:    openai.ChatMessageRoleUser,
@@ -295,6 +498,10 @@ func getAndSendResponse(
 	log.Println("Attempting to get response...")
 
 	ctx = context.WithValue(ctx, DGChannelID, channelID)
+	_, exists := state.threadMap[channelID]
+	if !exists {
+		state.resetOpenAIThread(channelID, client)
+	}
 	ctx = context.WithValue(ctx, ThreadID, state.threadMap[channelID].openAIThread.ID)
 	ctx = context.WithValue(ctx, AssistantID, state.assistantID)
 
@@ -311,7 +518,10 @@ func getAndSendResponse(
 		response = "Oh no! Something went wrong."
 	}
 
-	dg.ChannelMessageSend(channelID, response)
+	_, err = dg.ChannelMessageSend(channelID, response)
+	if err != nil {
+		log.Printf("Could not send discord message on channel %s: %s\n", channelID, err)
+	}
 }
 
 func removeQuery(url string) string {
