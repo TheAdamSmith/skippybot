@@ -30,7 +30,7 @@ if there is stock price information included in the message include that informa
 const SEND_CHANNEL_MSG_INSTRUCTIONS = `You are generating a message to send in a discord channel. Generate a message based on the prompt.
 	If a user id is provided use it in your message.
 `
-const GENERATE_GAME_STAT_INSTRUCTIONS = `You are summarizing a users game states. 
+const GENERATE_GAME_STAT_INSTRUCTIONS = `You are summarizing a users game sessions. 
 	The message will be a a json formatted list of game sessions. 
 	Please summarise the results of the sessions including total hours played and the most played game.
 	This is the user mention (%s) of the user you are summarizing. Please include it in your message.
