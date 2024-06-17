@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"log"
 	"os"
 
@@ -12,10 +13,21 @@ import (
 )
 
 func main() {
-	log.SetFlags(log.Ltime | log.Lshortfile)
-	log.Println("Initializing...")
 
-	err := godotenv.Load()
+	// Create or open a file for logging
+	file, err := os.OpenFile("skippy.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		log.Fatalf("Failed to open log file: %v", err)
+	}
+	defer file.Close()
+
+	log.SetFlags(log.Ltime | log.Lshortfile | log.Ldate)
+
+	log.Println("Initializing...")
+	// Create a multi-writer to write to both the file and stdout
+	mw := io.MultiWriter(file, os.Stdout)
+	log.SetOutput(mw)
+	err = godotenv.Load()
 	if err != nil {
 		log.Fatalln("Unable to load env variables")
 	}
@@ -39,5 +51,10 @@ func main() {
 	clientConfig.AssistantVersion = "v2"
 	client := openai.NewClientWithConfig(clientConfig)
 
-	skippy.RunDiscord(token, client, assistantID)
+	log.Println("Connecting to db")
+	db, err := skippy.NewDB("sqlite", "skippy.db")
+	if err != nil {
+		log.Fatalln("Unable to get database connection", err)
+	}
+	skippy.RunDiscord(token, assistantID, client, db)
 }
