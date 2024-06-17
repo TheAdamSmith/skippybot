@@ -30,6 +30,11 @@ if there is stock price information included in the message include that informa
 const SEND_CHANNEL_MSG_INSTRUCTIONS = `You are generating a message to send in a discord channel. Generate a message based on the prompt.
 	If a user id is provided use it in your message.
 `
+const GENERATE_GAME_STAT_INSTRUCTIONS = `You are summarizing a users game states. 
+	The message will be a a json formatted list of game sessions. 
+	Please summarise the results of the sessions including total hours played and the most played game.
+	This is the user mention (%s) of the user you are summarizing. Please include it in your message.
+	`
 
 func RunDiscord(token string, assistantID string, client *openai.Client, db Database) {
 	state := NewState(assistantID)
@@ -57,7 +62,7 @@ func RunDiscord(token string, assistantID string, client *openai.Client, db Data
 
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if i.Type == discordgo.InteractionApplicationCommand {
-			onCommand(s, i, client, state)
+			onCommand(s, i, client, state, db)
 		}
 	})
 
@@ -221,15 +226,6 @@ func onPresenceUpdate(dg *discordgo.Session, p *discordgo.PresenceUpdate, s *Sta
 		err = db.CreateGameSession(userSession)
 		if err != nil {
 			log.Println("Unable to create game session: ", err)
-		}
-		log.Println("ID: ", userSession.ID)
-		sessions, err := db.GetGameSessionsByUser(p.User.ID)
-		if err != nil {
-			log.Println("Unable to get game sessions: ", err)
-		}
-
-		for _, session := range sessions {
-			log.Println("Session: ", session)
 		}
 
 		log.Printf(

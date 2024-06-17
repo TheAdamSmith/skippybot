@@ -2,6 +2,7 @@ package skippy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -15,12 +16,13 @@ const (
 	RL_SESH        = "rl_sesh"
 	ALWAYS_RESPOND = "always_respond"
 	SEND_MESSAGE   = "send_message"
+	GAME_STATS     = "game_stats"
 )
 
 func initSlashCommands(dg *discordgo.Session) ([]*discordgo.ApplicationCommand, error) {
 	var commands []*discordgo.ApplicationCommand
 	command := discordgo.ApplicationCommand{
-		Name:        "send_message",
+		Name:        SEND_MESSAGE,
 		Description: "Have the bot send a message",
 		Options: []*discordgo.ApplicationCommandOption{
 			{
@@ -52,7 +54,7 @@ func initSlashCommands(dg *discordgo.Session) ([]*discordgo.ApplicationCommand, 
 	}
 
 	command = discordgo.ApplicationCommand{
-		Name:        "always_respond",
+		Name:        ALWAYS_RESPOND,
 		Description: "Toggle auto respond when on Skippy will always respond to messages in this channel",
 	}
 
@@ -64,7 +66,18 @@ func initSlashCommands(dg *discordgo.Session) ([]*discordgo.ApplicationCommand, 
 	}
 
 	command = discordgo.ApplicationCommand{
-		Name:        "rl_sesh",
+		Name:        GAME_STATS,
+		Description: "Get your game stats",
+	}
+
+	applicationCommand, err = dg.ApplicationCommandCreate(dg.State.User.ID, "", &command)
+	commands = append(commands, applicationCommand)
+
+	if err != nil {
+		log.Println("error creating application command: ", err)
+	}
+	command = discordgo.ApplicationCommand{
+		Name:        RL_SESH,
 		Description: "start/stop rl sesh",
 		Options: []*discordgo.ApplicationCommandOption{
 			{
@@ -90,6 +103,7 @@ func onCommand(
 	i *discordgo.InteractionCreate,
 	client *openai.Client,
 	state *State,
+	db Database,
 ) {
 	log.Println(i.ApplicationCommandData().Name)
 	switch i.ApplicationCommandData().Name {
@@ -99,6 +113,8 @@ func onCommand(
 		handleAlwaysRespond(dg, i, client, state)
 	case SEND_MESSAGE:
 		sendChannelMessage(dg, i, client, state)
+	case GAME_STATS:
+		generateGameStats(dg, i, client, state, db)
 	default:
 		log.Println("recieved unrecognized command")
 		err := dg.InteractionRespond(i.Interaction,
@@ -116,6 +132,56 @@ func onCommand(
 
 }
 
+func generateGameStats(
+	dg *discordgo.Session,
+	i *discordgo.InteractionCreate,
+	client *openai.Client,
+	state *State,
+	db Database,
+) error {
+	sessions, err := db.GetGameSessionsByUser(i.Member.User.ID)
+	if err != nil {
+		log.Println("Unable to get game sessions: ", err)
+		return err
+	}
+
+	jsonData, err := json.Marshal(sessions.ToGameSessionAI())
+	if err != nil {
+		log.Println("Unable to marshal json: ", err)
+		return err
+	}
+
+	messageReq := openai.MessageRequest{
+		Role:    openai.ChatMessageRoleUser,
+		Content: string(jsonData),
+	}
+	ctx := context.WithValue(context.Background(), DisableFunctions, true)
+
+	go getAndSendResponse(
+		ctx,
+		dg,
+		i.ChannelID,
+		messageReq,
+		fmt.Sprintf(GENERATE_GAME_STAT_INSTRUCTIONS, i.Member.Mention()),
+		client,
+		state,
+	)
+
+	err = dg.InteractionRespond(i.Interaction,
+		&discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "On it!",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+	if err != nil {
+		log.Printf("Error responding to slash command: %s\n", err)
+		return err
+	}
+
+	return nil
+}
 func sendChannelMessage(
 	dg *discordgo.Session,
 	i *discordgo.InteractionCreate,
@@ -165,7 +231,7 @@ func sendChannelMessage(
 		&discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "Sent the message",
+				Content: "On it!",
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
