@@ -16,6 +16,9 @@ type State struct {
 	userPresenceMap map[string]*userPresence
 	assistantID     string
 	mu              sync.RWMutex
+	discordToken    string
+	stockApiKey     string
+	weatherApiKey   string
 }
 
 type userPresence struct {
@@ -36,11 +39,19 @@ type chatThread struct {
 	// reponses []string
 }
 
-func NewState(assistantID string) *State {
+func NewState(
+	assistantID string,
+	discordToken string,
+	stockApiKey string,
+	weatherApiKey string,
+) *State {
 	return &State{
 		threadMap:       make(map[string]*chatThread),
 		userPresenceMap: make(map[string]*userPresence),
 		assistantID:     assistantID,
+		discordToken:    discordToken,
+		stockApiKey:     stockApiKey,
+		weatherApiKey:   weatherApiKey,
 	}
 }
 
@@ -51,11 +62,28 @@ func (s *State) GetThread(threadID string) (*chatThread, bool) {
 	return thread, exists
 }
 
+// TODO: should return error
+func (s *State) GetOrCreateThread(threadID string, client *openai.Client) *chatThread {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	thread, exists := s.threadMap[threadID]
+	if exists {
+		return thread
+	}
+	s.ResetOpenAIThread(threadID, client)
+	thread = s.threadMap[threadID]
+	return thread
+}
+
 func (s *State) SetThread(threadID string, thread *chatThread) {
 	s.threadMap[threadID] = thread
 }
 
-func (s *State) AddCancelFunc(threadID string, cancelFunc context.CancelFunc, client *openai.Client) {
+func (s *State) AddCancelFunc(
+	threadID string,
+	cancelFunc context.CancelFunc,
+	client *openai.Client,
+) {
 	_, exists := s.threadMap[threadID]
 	if !exists {
 		s.ResetOpenAIThread(threadID, client)
@@ -133,8 +161,26 @@ func (s *State) SetAwaitsResponse(threadID string, awaitsResponse bool, client *
 	s.threadMap[threadID].awaitsResponse = awaitsResponse
 }
 
+func (s *State) GetDiscordToken() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.discordToken
+}
+
 func (s *State) GetAssistantID() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.assistantID
+}
+
+func (s *State) GetStockAPIKey() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.stockApiKey
+}
+
+func (s *State) GetWeatherAPIKey() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.weatherApiKey
 }

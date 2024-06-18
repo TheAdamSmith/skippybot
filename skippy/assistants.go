@@ -272,7 +272,7 @@ func handleGetWeather(
 
 	log.Println("getting weather for: ", weatherFuncArgs.Location)
 
-	output, err := getWeather(weatherFuncArgs.Location)
+	output, err := getWeather(weatherFuncArgs.Location, state.GetWeatherAPIKey())
 	if err != nil {
 		log.Println("Unable to get stock price: ", err)
 		return "There was a problem making that api call", err
@@ -297,7 +297,7 @@ func handleGetStockPrice(
 
 	log.Println("getting price for: ", stockFuncArgs.Symbol)
 
-	output, err := getStockPrice(stockFuncArgs.Symbol)
+	output, err := getStockPrice(stockFuncArgs.Symbol, state.GetStockAPIKey())
 	if err != nil {
 		log.Println("Unable to get stock price: ", err)
 		return "There was a problem making that api call", err
@@ -575,7 +575,7 @@ func startMorningMessageLoop(
 
 			message := "Please tell everyone @here good morning."
 			for _, location := range morningMsgFuncArgs.WeatherLocations {
-				weather, err := getWeather(location)
+				weather, err := getWeather(location, state.GetWeatherAPIKey())
 				if err != nil {
 					log.Printf("unable to get weather for %s: %s\n", location, err)
 					continue
@@ -584,7 +584,7 @@ func startMorningMessageLoop(
 			}
 
 			for _, stock := range morningMsgFuncArgs.Stocks {
-				stockPrice, err := getStockPrice(stock)
+				stockPrice, err := getStockPrice(stock, state.GetStockAPIKey())
 				if err != nil {
 					log.Printf("unable to get weather for %s: %s\n", stock, err)
 					continue

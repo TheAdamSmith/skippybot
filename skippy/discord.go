@@ -36,8 +36,8 @@ const GENERATE_GAME_STAT_INSTRUCTIONS = `You are summarizing a users game sessio
 	This is the user mention (%s) of the user you are summarizing. Please include it in your message.
 	`
 
-func RunDiscord(token string, assistantID string, client *openai.Client, db Database) {
-	state := NewState(assistantID)
+func RunDiscord(token string, assistantID string, stockAPIKey string, weatherAPIKey string, client *openai.Client, db Database) {
+	state := NewState(assistantID, token, stockAPIKey, weatherAPIKey)
 
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
@@ -171,10 +171,8 @@ func getAndSendResponse(
 	log.Println("Attempting to get response...")
 
 	ctx = context.WithValue(ctx, DGChannelID, channelID)
-	thread, exists := state.GetThread(channelID)
-	if !exists {
-		state.ResetOpenAIThread(channelID, client)
-	}
+
+	thread := state.GetOrCreateThread(channelID, client)
 	ctx = context.WithValue(ctx, ThreadID, thread.openAIThread.ID)
 	ctx = context.WithValue(ctx, AssistantID, state.GetAssistantID())
 

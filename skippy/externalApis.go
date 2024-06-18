@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 )
 
 // https://www.alphavantage.co/documentation/
@@ -28,12 +27,7 @@ type ApiResponse struct {
 	GlobalQuote GlobalQuote `json:"Global Quote"`
 }
 
-func getStockPrice(symbol string) (string, error) {
-	// TODO: move this out should have a secret manager
-	apiKey := os.Getenv("ALPHA_VANTAGE_API_KEY")
-	if apiKey == "" {
-		return "", fmt.Errorf("unable to get alpha vantage api key")
-	}
+func getStockPrice(symbol string, apiKey string) (string, error) {
 
 	baseURL := "https://www.alphavantage.co/query"
 
@@ -73,13 +67,7 @@ func getStockPrice(symbol string) (string, error) {
 	return apiResponse.GlobalQuote.Price, nil
 }
 
-func getWeather(location string) (string, error) {
-	// TODO: move this out should have a secret manager
-	apiKey := os.Getenv("WEATHER_API_KEY")
-	if apiKey == "" {
-		return "", fmt.Errorf("unable to get alpha vantage api key")
-	}
-
+func getWeather(location string, apiKey string) (string, error) {
 	baseURL := "http://api.weatherapi.com/v1/forecast.json"
 
 	u, err := url.Parse(baseURL)

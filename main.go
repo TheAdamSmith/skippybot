@@ -47,6 +47,8 @@ func main() {
 		log.Fatalln("could not read Assistant ID")
 	}
 
+	stockPriceAPIKey := os.Getenv("ALPHA_VANTAGE_API_KEY")
+	weatherAPIKey := os.Getenv("WEATHER_API_KEY")
 	clientConfig := openai.DefaultConfig(openAIKey)
 	clientConfig.AssistantVersion = "v2"
 	client := openai.NewClientWithConfig(clientConfig)
@@ -56,5 +58,5 @@ func main() {
 	if err != nil {
 		log.Fatalln("Unable to get database connection", err)
 	}
-	skippy.RunDiscord(token, assistantID, client, db)
+	skippy.RunDiscord(token, assistantID, stockPriceAPIKey, weatherAPIKey, client, db)
 }
