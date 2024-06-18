@@ -58,25 +58,15 @@ type ReminderFuncArgs struct {
 func GetResponse(
 	ctx context.Context,
 	dg *discordgo.Session,
+	threadID string,
+	dgChannID string,
 	messageReq openai.MessageRequest,
 	state *State,
 	client *openai.Client,
 	additionalInstructions string,
 ) (string, error) {
-	threadID, ok := ctx.Value(ThreadID).(string)
-	if !ok {
-		return "", fmt.Errorf("could not find context value: %s", string(ThreadID))
-	}
 
-	dgChannID, ok := ctx.Value(DGChannelID).(string)
-	if !ok {
-		return "", fmt.Errorf("could not find context value: %s", string(DGChannelID))
-	}
-
-	assistantID, ok := ctx.Value(AssistantID).(string)
-	if !ok {
-		return "", fmt.Errorf("could not find context value: %s", string(DGChannelID))
-	}
+	assistantID := state.GetAssistantID()
 
 	disableFunctions, ok := ctx.Value(DisableFunctions).(bool)
 	if !ok {
@@ -272,7 +262,7 @@ func handleGetWeather(
 
 	log.Println("getting weather for: ", weatherFuncArgs.Location)
 
-	output, err := getWeather(weatherFuncArgs.Location)
+	output, err := getWeather(weatherFuncArgs.Location, state.GetWeatherAPIKey())
 	if err != nil {
 		log.Println("Unable to get stock price: ", err)
 		return "There was a problem making that api call", err
@@ -286,7 +276,6 @@ func handleGetStockPrice(
 	funcArg FuncArgs,
 	client *openai.Client,
 	state *State,
-
 ) (string, error) {
 
 	stockFuncArgs := StockFuncArgs{}
@@ -298,7 +287,7 @@ func handleGetStockPrice(
 
 	log.Println("getting price for: ", stockFuncArgs.Symbol)
 
-	output, err := getStockPrice(stockFuncArgs.Symbol)
+	output, err := getStockPrice(stockFuncArgs.Symbol, state.GetStockAPIKey())
 	if err != nil {
 		log.Println("Unable to get stock price: ", err)
 		return "There was a problem making that api call", err
@@ -397,7 +386,8 @@ func setReminder(
 		},
 	)
 
-	state.threadMap[channelID].awaitsResponse = true
+	// TODO: this is not timed correctly should happen only after reminder
+	state.SetAwaitsResponse(channelID, true, client)
 
 	go waitForReminderResponse(
 		dg,
@@ -426,9 +416,12 @@ func waitForReminderResponse(
 	for {
 
 		<-timer.C
-
+		thread, exists := state.GetThread(channelID)
+		if !exists {
+			return
+		}
 		// this value is reset on messageCreate
-		if !state.threadMap[channelID].awaitsResponse || reminds == maxRemind {
+		if !thread.awaitsResponse || reminds == maxRemind {
 			timer.Stop()
 			return
 		}
@@ -483,10 +476,15 @@ func toggleMorningMsg(
 ) string {
 
 	if !morningMsgFuncArgs.Enable {
-		cancel := state.threadMap[channelID].cancelFunc
+		thread, exists := state.GetThread(channelID)
+		if !exists {
+			log.Println("attempted to cancel morning message of thread that does not exist")
+			return "nothing to cancel"
+		}
+		cancel := thread.cancelFunc
 		if cancel == nil {
 			log.Println("cancel function does not exist returning")
-			return "worked"
+			return "nothing to cancel"
 		}
 		cancel()
 		log.Println("canceled morning message")
@@ -521,7 +519,7 @@ func toggleMorningMsg(
 	duration := givenTime.Sub(now)
 	log.Println("sending morning message in: ", duration)
 	ctx, cancel := context.WithCancel(context.Background())
-	state.threadMap[channelID].cancelFunc = cancel
+	state.AddCancelFunc(channelID, cancel, client)
 	go startMorningMessageLoop(
 		ctx,
 		dg,
@@ -567,7 +565,7 @@ func startMorningMessageLoop(
 
 			message := "Please tell everyone @here good morning."
 			for _, location := range morningMsgFuncArgs.WeatherLocations {
-				weather, err := getWeather(location)
+				weather, err := getWeather(location, state.GetWeatherAPIKey())
 				if err != nil {
 					log.Printf("unable to get weather for %s: %s\n", location, err)
 					continue
@@ -576,7 +574,7 @@ func startMorningMessageLoop(
 			}
 
 			for _, stock := range morningMsgFuncArgs.Stocks {
-				stockPrice, err := getStockPrice(stock)
+				stockPrice, err := getStockPrice(stock, state.GetStockAPIKey())
 				if err != nil {
 					log.Printf("unable to get weather for %s: %s\n", stock, err)
 					continue
@@ -593,7 +591,7 @@ func startMorningMessageLoop(
 			ctx = context.WithValue(ctx, DisableFunctions, true)
 
 			// reset the thread every morning
-			state.resetOpenAIThread(channelID, client)
+			state.ResetOpenAIThread(channelID, client)
 
 			getAndSendResponse(
 				ctx,

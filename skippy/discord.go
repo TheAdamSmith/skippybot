@@ -36,8 +36,15 @@ const GENERATE_GAME_STAT_INSTRUCTIONS = `You are summarizing a users game sessio
 	This is the user mention (%s) of the user you are summarizing. Please include it in your message.
 	`
 
-func RunDiscord(token string, assistantID string, client *openai.Client, db Database) {
-	state := NewState(assistantID)
+func RunDiscord(
+	token string,
+	assistantID string,
+	stockAPIKey string,
+	weatherAPIKey string,
+	client *openai.Client,
+	db Database,
+) {
+	state := NewState(assistantID, token, stockAPIKey, weatherAPIKey)
 
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
@@ -80,50 +87,46 @@ func RunDiscord(token string, assistantID string, client *openai.Client, db Data
 }
 
 func messageCreate(
-	s *discordgo.Session,
+	dg *discordgo.Session,
 	m *discordgo.MessageCreate,
 	client *openai.Client,
 	state *State,
 ) {
 	// Ignore all messages created by the bot itself
-	if m.Author.ID == s.State.User.ID {
+	if m.Author.ID == dg.State.User.ID {
 		return
 	}
 
 	log.Printf("Recieved Message: %s\n", m.Content)
 
-	_, threadExists := state.threadMap[m.ChannelID]
+	thread := state.GetOrCreateThread(m.ChannelID, client)
 
-	if threadExists {
-		if state.threadMap[m.ChannelID].awaitsResponse {
-			messageReq := openai.MessageRequest{
-				Role:    openai.ChatMessageRoleUser,
-				Content: m.Content,
-			}
-			getAndSendResponse(
-				context.Background(),
-				s,
-				m.ChannelID,
-				messageReq,
-				DEFAULT_INSTRUCTIONS,
-				client,
-				state,
-			)
+	if thread.awaitsResponse {
+		messageReq := openai.MessageRequest{
+			Role:    openai.ChatMessageRoleUser,
+			Content: m.Content,
 		}
+		getAndSendResponse(
+			context.Background(),
+			dg,
+			m.ChannelID,
+			messageReq,
+			DEFAULT_INSTRUCTIONS,
+			client,
+			state,
+		)
 		// value used by reminders to see if it needs to send another message to user
-		state.threadMap[m.ChannelID].awaitsResponse = false
+		state.SetAwaitsResponse(m.ChannelID, false, client)
 	}
 
-	role, roleMentioned := isRoleMentioned(s, m)
+	role, roleMentioned := isRoleMentioned(dg, m)
 
-	isMentioned := isMentioned(m.Mentions, s.State.User) || roleMentioned
-	alwaysRespond := threadExists && state.threadMap[m.ChannelID].alwaysRespond
-	// Check if the bot is mentioned
-	if !isMentioned && !alwaysRespond {
+	isMentioned := isMentioned(m.Mentions, dg.State.User) || roleMentioned
+	if !isMentioned && !thread.alwaysRespond {
 		return
 	}
 
-	message := removeBotMention(m.Content, s.State.User.ID)
+	message := removeBotMention(m.Content, dg.State.User.ID)
 	message = removeRoleMention(message, role)
 	message = replaceChannelIDs(message, m.MentionChannels)
 	message += "\n current time: "
@@ -134,13 +137,6 @@ func messageCreate(
 
 	log.Println("using message: ", message)
 
-	if !threadExists {
-		err := state.resetOpenAIThread(m.ChannelID, client)
-		if err != nil {
-			log.Println("Unable to reset thread: ", err)
-		}
-	}
-
 	log.Println("CHANELLID: ", m.ChannelID)
 	messageReq := openai.MessageRequest{
 		Role:    openai.ChatMessageRoleUser,
@@ -148,7 +144,7 @@ func messageCreate(
 	}
 	getAndSendResponse(
 		context.Background(),
-		s,
+		dg,
 		m.ChannelID,
 		messageReq,
 		DEFAULT_INSTRUCTIONS,
@@ -160,28 +156,24 @@ func messageCreate(
 func getAndSendResponse(
 	ctx context.Context,
 	dg *discordgo.Session,
-	channelID string,
+	dgChannID string,
 	messageReq openai.MessageRequest,
 	additionalInstructions string,
 	client *openai.Client,
 	state *State) {
-	dg.ChannelTyping(channelID)
+	dg.ChannelTyping(dgChannID)
 
 	log.Printf("Recieved message: %s with role: %s\n", messageReq.Content, messageReq.Role)
 
 	log.Println("Attempting to get response...")
 
-	ctx = context.WithValue(ctx, DGChannelID, channelID)
-	_, exists := state.threadMap[channelID]
-	if !exists {
-		state.resetOpenAIThread(channelID, client)
-	}
-	ctx = context.WithValue(ctx, ThreadID, state.threadMap[channelID].openAIThread.ID)
-	ctx = context.WithValue(ctx, AssistantID, state.assistantID)
+	thread := state.GetOrCreateThread(dgChannID, client)
 
 	response, err := GetResponse(
 		ctx,
 		dg,
+		thread.openAIThread.ID,
+		dgChannID,
 		messageReq,
 		state,
 		client,
@@ -192,15 +184,15 @@ func getAndSendResponse(
 		response = "Oh no! Something went wrong."
 	}
 
-	_, err = dg.ChannelMessageSend(channelID, response)
+	_, err = dg.ChannelMessageSend(dgChannID, response)
 	if err != nil {
-		log.Printf("Could not send discord message on channel %s: %s\n", channelID, err)
+		log.Printf("Could not send discord message on channel %s: %s\n", dgChannID, err)
 	}
 }
 
 func onPresenceUpdate(dg *discordgo.Session, p *discordgo.PresenceUpdate, s *State, db Database) {
 	game, isPlayingGame := getCurrentGame(p)
-	userPresence, exists := s.getPresence(p.User.ID)
+	userPresence, exists := s.GetPresence(p.User.ID)
 
 	member, err := dg.State.Member(p.GuildID, p.User.ID)
 	if err != nil {
@@ -211,7 +203,7 @@ func onPresenceUpdate(dg *discordgo.Session, p *discordgo.PresenceUpdate, s *Sta
 
 	if startedPlaying {
 		log.Printf("User %s started playing %s\n", member.User.Username, game)
-		s.updatePresence(p.User.ID, p.Status, isPlayingGame, game, time.Now())
+		s.UpdatePresence(p.User.ID, p.Status, isPlayingGame, game, time.Now())
 	}
 
 	if stoppedPlaying {
@@ -234,9 +226,8 @@ func onPresenceUpdate(dg *discordgo.Session, p *discordgo.PresenceUpdate, s *Sta
 			userPresence.game,
 			duration,
 		)
-		s.updatePresence(p.User.ID, p.Status, isPlayingGame, "", time.Time{})
+		s.UpdatePresence(p.User.ID, p.Status, isPlayingGame, "", time.Time{})
 	}
-
 }
 
 func getCurrentGame(p *discordgo.PresenceUpdate) (string, bool) {
