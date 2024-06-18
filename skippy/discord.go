@@ -36,7 +36,14 @@ const GENERATE_GAME_STAT_INSTRUCTIONS = `You are summarizing a users game sessio
 	This is the user mention (%s) of the user you are summarizing. Please include it in your message.
 	`
 
-func RunDiscord(token string, assistantID string, stockAPIKey string, weatherAPIKey string, client *openai.Client, db Database) {
+func RunDiscord(
+	token string,
+	assistantID string,
+	stockAPIKey string,
+	weatherAPIKey string,
+	client *openai.Client,
+	db Database,
+) {
 	state := NewState(assistantID, token, stockAPIKey, weatherAPIKey)
 
 	dg, err := discordgo.New("Bot " + token)
@@ -92,24 +99,22 @@ func messageCreate(
 
 	log.Printf("Recieved Message: %s\n", m.Content)
 
-	thread, threadExists := state.GetThread(m.ChannelID)
+	thread := state.GetOrCreateThread(m.ChannelID, client)
 
-	if threadExists {
-		if thread.awaitsResponse {
-			messageReq := openai.MessageRequest{
-				Role:    openai.ChatMessageRoleUser,
-				Content: m.Content,
-			}
-			getAndSendResponse(
-				context.Background(),
-				dg,
-				m.ChannelID,
-				messageReq,
-				DEFAULT_INSTRUCTIONS,
-				client,
-				state,
-			)
+	if thread.awaitsResponse {
+		messageReq := openai.MessageRequest{
+			Role:    openai.ChatMessageRoleUser,
+			Content: m.Content,
 		}
+		getAndSendResponse(
+			context.Background(),
+			dg,
+			m.ChannelID,
+			messageReq,
+			DEFAULT_INSTRUCTIONS,
+			client,
+			state,
+		)
 		// value used by reminders to see if it needs to send another message to user
 		state.SetAwaitsResponse(m.ChannelID, false, client)
 	}
@@ -117,8 +122,7 @@ func messageCreate(
 	role, roleMentioned := isRoleMentioned(dg, m)
 
 	isMentioned := isMentioned(m.Mentions, dg.State.User) || roleMentioned
-	alwaysRespond := threadExists && thread.alwaysRespond
-	if !isMentioned && !alwaysRespond {
+	if !isMentioned && !thread.alwaysRespond {
 		return
 	}
 
@@ -132,13 +136,6 @@ func messageCreate(
 	message += "\n User ID: " + m.Author.Mention()
 
 	log.Println("using message: ", message)
-
-	if !threadExists {
-		err := state.ResetOpenAIThread(m.ChannelID, client)
-		if err != nil {
-			log.Println("Unable to reset thread: ", err)
-		}
-	}
 
 	log.Println("CHANELLID: ", m.ChannelID)
 	messageReq := openai.MessageRequest{

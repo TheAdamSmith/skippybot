@@ -171,8 +171,8 @@ func generateGameStats(
 		&discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "On it!",
-				Flags:   discordgo.MessageFlagsEphemeral,
+				Content: "Fetching your stats!",
+				Flags:   discordgo.MessageFlagsLoading,
 			},
 		})
 	if err != nil {

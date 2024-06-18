@@ -47,7 +47,6 @@ func StartRocketLeagueSession(
 ) error {
 
 	fileCh := make(chan string)
-	defer close(fileCh)
 
 	if filePath != "" {
 		log.Println("Starting rocket league session watching : ", filePath)
@@ -59,9 +58,11 @@ func StartRocketLeagueSession(
 	}
 
 	go func() {
+		defer close(fileCh)
 		for {
 			select {
 			case gameInfo := <-fileCh:
+				log.Println("Received game info: ", gameInfo)
 				messageReq := openai.MessageRequest{
 					Role:    openai.ChatMessageRoleAssistant,
 					Content: gameInfo,

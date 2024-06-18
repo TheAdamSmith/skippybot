@@ -65,13 +65,19 @@ func (s *State) GetThread(threadID string) (*chatThread, bool) {
 // TODO: should return error
 func (s *State) GetOrCreateThread(threadID string, client *openai.Client) *chatThread {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	thread, exists := s.threadMap[threadID]
 	if exists {
+		s.mu.RUnlock()
 		return thread
 	}
+
+	s.mu.RUnlock()
 	s.ResetOpenAIThread(threadID, client)
+
+	s.mu.RLock()
 	thread = s.threadMap[threadID]
+	s.mu.RUnlock()
+
 	return thread
 }
 
