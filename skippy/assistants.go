@@ -58,25 +58,15 @@ type ReminderFuncArgs struct {
 func GetResponse(
 	ctx context.Context,
 	dg *discordgo.Session,
+	threadID string,
+	dgChannID string,
 	messageReq openai.MessageRequest,
 	state *State,
 	client *openai.Client,
 	additionalInstructions string,
 ) (string, error) {
-	threadID, ok := ctx.Value(ThreadID).(string)
-	if !ok {
-		return "", fmt.Errorf("could not find context value: %s", string(ThreadID))
-	}
 
-	dgChannID, ok := ctx.Value(DGChannelID).(string)
-	if !ok {
-		return "", fmt.Errorf("could not find context value: %s", string(DGChannelID))
-	}
-
-	assistantID, ok := ctx.Value(AssistantID).(string)
-	if !ok {
-		return "", fmt.Errorf("could not find context value: %s", string(DGChannelID))
-	}
+	assistantID := state.GetAssistantID()
 
 	disableFunctions, ok := ctx.Value(DisableFunctions).(bool)
 	if !ok {

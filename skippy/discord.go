@@ -159,26 +159,24 @@ func messageCreate(
 func getAndSendResponse(
 	ctx context.Context,
 	dg *discordgo.Session,
-	channelID string,
+	dgChannID string,
 	messageReq openai.MessageRequest,
 	additionalInstructions string,
 	client *openai.Client,
 	state *State) {
-	dg.ChannelTyping(channelID)
+	dg.ChannelTyping(dgChannID)
 
 	log.Printf("Recieved message: %s with role: %s\n", messageReq.Content, messageReq.Role)
 
 	log.Println("Attempting to get response...")
 
-	ctx = context.WithValue(ctx, DGChannelID, channelID)
-
-	thread := state.GetOrCreateThread(channelID, client)
-	ctx = context.WithValue(ctx, ThreadID, thread.openAIThread.ID)
-	ctx = context.WithValue(ctx, AssistantID, state.GetAssistantID())
+	thread := state.GetOrCreateThread(dgChannID, client)
 
 	response, err := GetResponse(
 		ctx,
 		dg,
+		thread.openAIThread.ID,
+		dgChannID,
 		messageReq,
 		state,
 		client,
@@ -189,9 +187,9 @@ func getAndSendResponse(
 		response = "Oh no! Something went wrong."
 	}
 
-	_, err = dg.ChannelMessageSend(channelID, response)
+	_, err = dg.ChannelMessageSend(dgChannID, response)
 	if err != nil {
-		log.Printf("Could not send discord message on channel %s: %s\n", channelID, err)
+		log.Printf("Could not send discord message on channel %s: %s\n", dgChannID, err)
 	}
 }
 
