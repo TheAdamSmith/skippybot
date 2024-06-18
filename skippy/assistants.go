@@ -286,7 +286,6 @@ func handleGetStockPrice(
 	funcArg FuncArgs,
 	client *openai.Client,
 	state *State,
-
 ) (string, error) {
 
 	stockFuncArgs := StockFuncArgs{}
@@ -397,7 +396,8 @@ func setReminder(
 		},
 	)
 
-	state.threadMap[channelID].awaitsResponse = true
+	// TODO: this is not timed correctly should happen only after reminder
+	state.SetAwaitsResponse(channelID, true, client)
 
 	go waitForReminderResponse(
 		dg,
@@ -426,9 +426,12 @@ func waitForReminderResponse(
 	for {
 
 		<-timer.C
-
+		thread, exists := state.GetThread(channelID)
+		if !exists {
+			return
+		}
 		// this value is reset on messageCreate
-		if !state.threadMap[channelID].awaitsResponse || reminds == maxRemind {
+		if !thread.awaitsResponse || reminds == maxRemind {
 			timer.Stop()
 			return
 		}
@@ -483,10 +486,15 @@ func toggleMorningMsg(
 ) string {
 
 	if !morningMsgFuncArgs.Enable {
-		cancel := state.threadMap[channelID].cancelFunc
+		thread, exists := state.GetThread(channelID)
+		if !exists {
+			log.Println("attempted to cancel morning message of thread that does not exist")
+			return "nothing to cancel"
+		}
+		cancel := thread.cancelFunc
 		if cancel == nil {
 			log.Println("cancel function does not exist returning")
-			return "worked"
+			return "nothing to cancel"
 		}
 		cancel()
 		log.Println("canceled morning message")
@@ -521,7 +529,7 @@ func toggleMorningMsg(
 	duration := givenTime.Sub(now)
 	log.Println("sending morning message in: ", duration)
 	ctx, cancel := context.WithCancel(context.Background())
-	state.threadMap[channelID].cancelFunc = cancel
+	state.AddCancelFunc(channelID, cancel, client)
 	go startMorningMessageLoop(
 		ctx,
 		dg,
@@ -593,7 +601,7 @@ func startMorningMessageLoop(
 			ctx = context.WithValue(ctx, DisableFunctions, true)
 
 			// reset the thread every morning
-			state.resetOpenAIThread(channelID, client)
+			state.ResetOpenAIThread(channelID, client)
 
 			getAndSendResponse(
 				ctx,

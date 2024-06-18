@@ -80,29 +80,29 @@ func RunDiscord(token string, assistantID string, client *openai.Client, db Data
 }
 
 func messageCreate(
-	s *discordgo.Session,
+	dg *discordgo.Session,
 	m *discordgo.MessageCreate,
 	client *openai.Client,
 	state *State,
 ) {
 	// Ignore all messages created by the bot itself
-	if m.Author.ID == s.State.User.ID {
+	if m.Author.ID == dg.State.User.ID {
 		return
 	}
 
 	log.Printf("Recieved Message: %s\n", m.Content)
 
-	_, threadExists := state.threadMap[m.ChannelID]
+	thread, threadExists := state.GetThread(m.ChannelID)
 
 	if threadExists {
-		if state.threadMap[m.ChannelID].awaitsResponse {
+		if thread.awaitsResponse {
 			messageReq := openai.MessageRequest{
 				Role:    openai.ChatMessageRoleUser,
 				Content: m.Content,
 			}
 			getAndSendResponse(
 				context.Background(),
-				s,
+				dg,
 				m.ChannelID,
 				messageReq,
 				DEFAULT_INSTRUCTIONS,
@@ -111,19 +111,18 @@ func messageCreate(
 			)
 		}
 		// value used by reminders to see if it needs to send another message to user
-		state.threadMap[m.ChannelID].awaitsResponse = false
+		state.SetAwaitsResponse(m.ChannelID, false, client)
 	}
 
-	role, roleMentioned := isRoleMentioned(s, m)
+	role, roleMentioned := isRoleMentioned(dg, m)
 
-	isMentioned := isMentioned(m.Mentions, s.State.User) || roleMentioned
-	alwaysRespond := threadExists && state.threadMap[m.ChannelID].alwaysRespond
-	// Check if the bot is mentioned
+	isMentioned := isMentioned(m.Mentions, dg.State.User) || roleMentioned
+	alwaysRespond := threadExists && thread.alwaysRespond
 	if !isMentioned && !alwaysRespond {
 		return
 	}
 
-	message := removeBotMention(m.Content, s.State.User.ID)
+	message := removeBotMention(m.Content, dg.State.User.ID)
 	message = removeRoleMention(message, role)
 	message = replaceChannelIDs(message, m.MentionChannels)
 	message += "\n current time: "
@@ -135,7 +134,7 @@ func messageCreate(
 	log.Println("using message: ", message)
 
 	if !threadExists {
-		err := state.resetOpenAIThread(m.ChannelID, client)
+		err := state.ResetOpenAIThread(m.ChannelID, client)
 		if err != nil {
 			log.Println("Unable to reset thread: ", err)
 		}
@@ -148,7 +147,7 @@ func messageCreate(
 	}
 	getAndSendResponse(
 		context.Background(),
-		s,
+		dg,
 		m.ChannelID,
 		messageReq,
 		DEFAULT_INSTRUCTIONS,
@@ -172,12 +171,12 @@ func getAndSendResponse(
 	log.Println("Attempting to get response...")
 
 	ctx = context.WithValue(ctx, DGChannelID, channelID)
-	_, exists := state.threadMap[channelID]
+	thread, exists := state.GetThread(channelID)
 	if !exists {
-		state.resetOpenAIThread(channelID, client)
+		state.ResetOpenAIThread(channelID, client)
 	}
-	ctx = context.WithValue(ctx, ThreadID, state.threadMap[channelID].openAIThread.ID)
-	ctx = context.WithValue(ctx, AssistantID, state.assistantID)
+	ctx = context.WithValue(ctx, ThreadID, thread.openAIThread.ID)
+	ctx = context.WithValue(ctx, AssistantID, state.GetAssistantID())
 
 	response, err := GetResponse(
 		ctx,
@@ -200,7 +199,7 @@ func getAndSendResponse(
 
 func onPresenceUpdate(dg *discordgo.Session, p *discordgo.PresenceUpdate, s *State, db Database) {
 	game, isPlayingGame := getCurrentGame(p)
-	userPresence, exists := s.getPresence(p.User.ID)
+	userPresence, exists := s.GetPresence(p.User.ID)
 
 	member, err := dg.State.Member(p.GuildID, p.User.ID)
 	if err != nil {
@@ -211,7 +210,7 @@ func onPresenceUpdate(dg *discordgo.Session, p *discordgo.PresenceUpdate, s *Sta
 
 	if startedPlaying {
 		log.Printf("User %s started playing %s\n", member.User.Username, game)
-		s.updatePresence(p.User.ID, p.Status, isPlayingGame, game, time.Now())
+		s.UpdatePresence(p.User.ID, p.Status, isPlayingGame, game, time.Now())
 	}
 
 	if stoppedPlaying {
@@ -234,9 +233,8 @@ func onPresenceUpdate(dg *discordgo.Session, p *discordgo.PresenceUpdate, s *Sta
 			userPresence.game,
 			duration,
 		)
-		s.updatePresence(p.User.ID, p.Status, isPlayingGame, "", time.Time{})
+		s.UpdatePresence(p.User.ID, p.Status, isPlayingGame, "", time.Time{})
 	}
-
 }
 
 func getCurrentGame(p *discordgo.PresenceUpdate) (string, bool) {

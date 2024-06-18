@@ -249,7 +249,7 @@ func handleAlwaysRespond(
 	client *openai.Client,
 	state *State,
 ) {
-	enabled := state.toggleAlwaysRespond(i.ChannelID, client)
+	enabled := state.ToggleAlwaysRespond(i.ChannelID, client)
 	var message string
 	if enabled {
 		message = "Turned on always respond"
@@ -285,7 +285,7 @@ func handleRLSesh(
 	if textOption == "start" {
 		log.Println("Handling rl_sesh start command. creating new thread")
 
-		err := state.resetOpenAIThread(i.ChannelID, client)
+		err := state.ResetOpenAIThread(i.ChannelID, client)
 		if err != nil {
 			log.Println("Unable to create thread: ", err)
 			err = dg.InteractionRespond(i.Interaction,
@@ -302,7 +302,7 @@ func handleRLSesh(
 		}
 
 		ctx, cancelFunc := context.WithCancel(context.Background())
-		state.threadMap[i.ChannelID].cancelFunc = cancelFunc
+		state.AddCancelFunc(i.ChannelID, cancelFunc, client)
 
 		message := "Started rocket league session"
 		filePath := os.Getenv("RL_DIR")
@@ -325,7 +325,11 @@ func handleRLSesh(
 	if textOption == "stop" {
 
 		var message string
-		cancelFunc := state.threadMap[i.ChannelID].cancelFunc
+		thread, exists := state.GetThread(i.ChannelID)
+		if !exists {
+			message = "unable to stop session no thread found"
+		}
+		cancelFunc := thread.cancelFunc
 		if cancelFunc == nil {
 			message = "Unable to stop session no cancel function"
 		} else {
