@@ -82,6 +82,8 @@ func (s *State) GetOrCreateThread(threadID string, client *openai.Client) *chatT
 }
 
 func (s *State) SetThread(threadID string, thread *chatThread) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	s.threadMap[threadID] = thread
 }
 
@@ -90,10 +92,13 @@ func (s *State) AddCancelFunc(
 	cancelFunc context.CancelFunc,
 	client *openai.Client,
 ) {
+	// TODO: not completely thread safe
 	_, exists := s.threadMap[threadID]
 	if !exists {
 		s.ResetOpenAIThread(threadID, client)
 	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	s.threadMap[threadID].cancelFunc = cancelFunc
 }
 
