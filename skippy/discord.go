@@ -192,6 +192,8 @@ func getAndSendResponse(
 
 func onPresenceUpdate(dg *discordgo.Session, p *discordgo.PresenceUpdate, s *State, db Database) {
 	game, isPlayingGame := getCurrentGame(p)
+	isPlayingGame = isPlayingGame && game != ""
+
 	userPresence, exists := s.GetPresence(p.User.ID)
 
 	member, err := dg.State.Member(p.GuildID, p.User.ID)
@@ -207,7 +209,19 @@ func onPresenceUpdate(dg *discordgo.Session, p *discordgo.PresenceUpdate, s *Sta
 	}
 
 	if stoppedPlaying {
+
 		duration := time.Since(userPresence.timeStarted)
+
+		log.Printf(
+			"User %s stopped playing game %s, after %s\n",
+			member.User.Username,
+			userPresence.game,
+			duration,
+		)
+
+		// this state update must be done before the db call to avoid race conditions
+		s.UpdatePresence(p.User.ID, p.Status, isPlayingGame, "", time.Time{})
+
 		userSession := &GameSession{
 			UserID:    p.User.ID,
 			Game:      userPresence.game,
@@ -220,13 +234,6 @@ func onPresenceUpdate(dg *discordgo.Session, p *discordgo.PresenceUpdate, s *Sta
 			log.Println("Unable to create game session: ", err)
 		}
 
-		log.Printf(
-			"User %s stopped playing game %s, after %s\n",
-			member.User.Username,
-			userPresence.game,
-			duration,
-		)
-		s.UpdatePresence(p.User.ID, p.Status, isPlayingGame, "", time.Time{})
 	}
 }
 
