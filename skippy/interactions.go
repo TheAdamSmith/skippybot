@@ -151,22 +151,8 @@ func generateGameStats(
 		return err
 	}
 
-	messageReq := openai.MessageRequest{
-		Role:    openai.ChatMessageRoleUser,
-		Content: string(jsonData),
-	}
-	ctx := context.WithValue(context.Background(), DisableFunctions, true)
-
-	go getAndSendResponse(
-		ctx,
-		dg,
-		i.ChannelID,
-		messageReq,
-		fmt.Sprintf(GENERATE_GAME_STAT_INSTRUCTIONS, i.Member.Mention()),
-		client,
-		state,
-	)
-
+	// respond before sending response to maintain consistent
+	// ChannelTyping behavior
 	err = dg.InteractionRespond(i.Interaction,
 		&discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -180,6 +166,20 @@ func generateGameStats(
 		return err
 	}
 
+	messageReq := openai.MessageRequest{
+		Role:    openai.ChatMessageRoleUser,
+		Content: string(jsonData),
+	}
+	ctx := context.WithValue(context.Background(), DisableFunctions, true)
+	go getAndSendResponse(
+		ctx,
+		dg,
+		i.ChannelID,
+		messageReq,
+		fmt.Sprintf(GENERATE_GAME_STAT_INSTRUCTIONS, i.Member.Mention()),
+		client,
+		state,
+	)
 	return nil
 }
 func sendChannelMessage(

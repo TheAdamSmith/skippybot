@@ -165,10 +165,21 @@ func handleRequiresAction(
 	funcArgs := GetFunctionArgs(run)
 
 	var toolOutputs []openai.ToolOutput
+outerloop:
 	for _, funcArg := range funcArgs {
 
 		log.Printf("recieved function request:%+v", funcArg)
 		switch funcName := funcArg.FuncName; funcName {
+		case ToggleMorningMessage:
+			log.Println("toggle_morning_message()")
+			output, err := handleMorningMessage(dg, funcArg, dgChannID, client, state)
+			if err != nil {
+				log.Println("error handling morning message: ", err)
+			}
+			// the bot will confuse multiple functions calls with this one so
+			// we only want to set the morning message if it is called
+			toolOutputs = makeNoOpToolOutputs(funcArgs, funcArg.ToolID, output)
+			break outerloop
 		case GetStockPriceKey:
 			log.Println("get_stock_price()")
 
@@ -216,16 +227,6 @@ func handleRequiresAction(
 			output, err := setReminder(context.Background(), dg, funcArg, dgChannID, client, state)
 			if err != nil {
 				log.Println("error sending channel message: ", err)
-			}
-			toolOutputs = append(
-				toolOutputs,
-				openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: output},
-			)
-		case ToggleMorningMessage:
-			log.Println("toggle_morning_message()")
-			output, err := handleMorningMessage(dg, funcArg, dgChannID, client, state)
-			if err != nil {
-				log.Println("error handling morning message: ", err)
 			}
 			toolOutputs = append(
 				toolOutputs,
@@ -383,18 +384,16 @@ func setReminder(
 		duration,
 		func() {
 			dg.ChannelMessageSend(channelID, channelMsg.Message)
+			state.SetAwaitsResponse(channelID, true, client)
+
+			go waitForReminderResponse(
+				dg,
+				channelID,
+				channelMsg.UserID,
+				client,
+				state,
+			)
 		},
-	)
-
-	// TODO: this is not timed correctly should happen only after reminder
-	state.SetAwaitsResponse(channelID, true, client)
-
-	go waitForReminderResponse(
-		dg,
-		channelID,
-		channelMsg.UserID,
-		client,
-		state,
 	)
 
 	return "worked", nil
@@ -623,6 +622,24 @@ func submitToolOutputs(
 	return client.SubmitToolOutputs(context.Background(), threadID, runID, req)
 }
 
+// Creates a list of no-op tool outputs except for the provided toolID and output
+func makeNoOpToolOutputs(funcArgs []FuncArgs, toolID string, output string) []openai.ToolOutput {
+	var toolOutputs []openai.ToolOutput
+	for _, funcArg := range funcArgs {
+		if funcArg.ToolID == toolID {
+			toolOutputs = append(
+				toolOutputs,
+				openai.ToolOutput{ToolCallID: toolID, Output: output},
+			)
+		} else {
+			toolOutputs = append(
+				toolOutputs,
+				openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: "no-op"},
+			)
+		}
+	}
+	return toolOutputs
+}
 func GetFunctionArgs(r openai.Run) []FuncArgs {
 	toolCalls := r.RequiredAction.SubmitToolOutputs.ToolCalls
 	result := make([]FuncArgs, len(toolCalls))
