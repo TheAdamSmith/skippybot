@@ -11,6 +11,7 @@ type Database interface {
 	CreateGameSession(gs *GameSession) error
 	GetGameSession(id uint) (*GameSession, error)
 	GetGameSessionsByUser(userID string) (*GameSessions, error)
+	GetGameSessionsByUserAndDays(userID string, daysAgo int) (*GameSessions, error)
 }
 
 type GameSession struct {
@@ -20,6 +21,7 @@ type GameSession struct {
 	StartedAt time.Time
 	Duration  time.Duration
 }
+
 type GameSessions []GameSession
 
 type GameSessionAI struct {
@@ -68,5 +70,12 @@ func (db *DB) GetGameSession(id uint) (*GameSession, error) {
 func (db *DB) GetGameSessionsByUser(userID string) (*GameSessions, error) {
 	var gs *GameSessions
 	err := db.DB.Where(&GameSession{UserID: userID}).Find(&gs).Error
+	return gs, err
+}
+
+func (db *DB) GetGameSessionsByUserAndDays(userID string, daysAgo int) (*GameSessions, error) {
+	var gs *GameSessions
+	cutoff := time.Now().AddDate(0, 0, -daysAgo)
+	err := db.DB.Where("user_id = ? AND started_at >= ?", userID, cutoff).Find(&gs).Error
 	return gs, err
 }
