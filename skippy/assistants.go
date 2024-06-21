@@ -347,12 +347,8 @@ func getAndSendImage(
 	}
 
 	log.Printf("recieved image url (%s) attempting to send on channel %s\n", imgUrl, channelID)
-
-	_, err = dg.ChannelMessageSend(channelID, imgUrl)
-	if err != nil {
-		log.Println("unable to send message on channel: ", err)
-	}
-	return "image generated", nil
+	err = sendChunkedChannelMessage(dg, channelID, imgUrl)
+	return "image generated", err
 }
 
 func setReminder(
@@ -383,7 +379,7 @@ func setReminder(
 	time.AfterFunc(
 		duration,
 		func() {
-			dg.ChannelMessageSend(channelID, channelMsg.Message)
+			sendChunkedChannelMessage(dg, channelID, channelMsg.Message)
 			state.SetAwaitsResponse(channelID, true, client)
 
 			go waitForReminderResponse(

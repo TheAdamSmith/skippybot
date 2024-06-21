@@ -25,7 +25,7 @@ type GameSessions []GameSession
 type GameSessionAI struct {
 	Game        string
 	StartedAt   time.Time
-	HoursPlayed float64
+	HoursPlayed string
 }
 
 func (gs *GameSessions) ToGameSessionAI() []GameSessionAI {
@@ -34,7 +34,7 @@ func (gs *GameSessions) ToGameSessionAI() []GameSessionAI {
 		gsai = append(gsai, GameSessionAI{
 			Game:        g.Game,
 			StartedAt:   g.StartedAt,
-			HoursPlayed: g.Duration.Hours(),
+			HoursPlayed: g.Duration.String(),
 		})
 	}
 	return gsai

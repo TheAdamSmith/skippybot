@@ -145,10 +145,17 @@ func generateGameStats(
 		return err
 	}
 
-	jsonData, err := json.Marshal(sessions.ToGameSessionAI())
-	if err != nil {
-		log.Println("Unable to marshal json: ", err)
-		return err
+	aiGameSessions := sessions.ToGameSessionAI()
+	content := ""
+	if aiGameSessions == nil {
+		content = "Please respond saying that there were no games found for this user"
+	} else {
+		jsonData, err := json.Marshal(aiGameSessions)
+		if err != nil {
+			log.Println("Unable to marshal json: ", err)
+			return err
+		}
+		content = string(jsonData)
 	}
 
 	// respond before sending response to maintain consistent
@@ -168,7 +175,7 @@ func generateGameStats(
 
 	messageReq := openai.MessageRequest{
 		Role:    openai.ChatMessageRoleUser,
-		Content: string(jsonData),
+		Content: content,
 	}
 	ctx := context.WithValue(context.Background(), DisableFunctions, true)
 	go getAndSendResponse(
@@ -182,6 +189,7 @@ func generateGameStats(
 	)
 	return nil
 }
+
 func sendChannelMessage(
 	dg *discordgo.Session,
 	i *discordgo.InteractionCreate,

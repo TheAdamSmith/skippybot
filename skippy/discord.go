@@ -36,6 +36,11 @@ const GENERATE_GAME_STAT_INSTRUCTIONS = `You are summarizing a users game sessio
 	This is the user mention (%s) of the user you are summarizing. Please include it in your message.
 	`
 
+const (
+	DEBOUNCE_DELAY            = 100 * time.Millisecond
+	MIN_GAME_SESSION_DURATION = 10 * time.Minute
+)
+
 func RunDiscord(
 	token string,
 	assistantID string,
@@ -52,7 +57,6 @@ func RunDiscord(
 	}
 
 	dg.Identify.Intents = discordgo.IntentsAll
-
 	err = dg.Open()
 	if err != nil {
 		log.Fatalln("Unable to open discord client", err.Error())
@@ -73,8 +77,14 @@ func RunDiscord(
 		}
 	})
 
+	// discord presence update repeates calls rapidly
+	// might be from multiple servers so debounce the calls
+	debouncer := NewDebouncer(DEBOUNCE_DELAY)
 	dg.AddHandler(func(dg *discordgo.Session, p *discordgo.PresenceUpdate) {
-		onPresenceUpdate(dg, p, state, db)
+		debouncer.Debounce(p.User.ID, func() {
+			onPresenceUpdate(dg, p, state, db)
+		},
+		)
 	})
 
 	// deleteSlashCommands(dg)
@@ -84,6 +94,25 @@ func RunDiscord(
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, syscall.SIGTERM)
 	<-sc
+}
+
+func sendChunkedChannelMessage(dg *discordgo.Session, channelID string, message string) error {
+	// Discord has a limit of 2000 characters for a single message
+	// If the message is longer than that, we need to split it into chunks
+	for len(message) > 0 {
+		if len(message) > 2000 {
+			_, err := dg.ChannelMessageSend(channelID, message[:2000])
+			if err != nil {
+				log.Printf("Could not send discord message on channel %s: %s\n", channelID, err)
+				return err
+			}
+			message = message[2000:]
+		} else {
+			dg.ChannelMessageSend(channelID, message)
+			break
+		}
+	}
+	return nil
 }
 
 func messageCreate(
@@ -160,10 +189,10 @@ func getAndSendResponse(
 	messageReq openai.MessageRequest,
 	additionalInstructions string,
 	client *openai.Client,
-	state *State) {
+	state *State) error {
 	dg.ChannelTyping(dgChannID)
 
-	log.Printf("Recieved message: %s with role: %s\n", messageReq.Content, messageReq.Role)
+	log.Printf("Using message: %s\n", messageReq.Content)
 
 	log.Println("Attempting to get response...")
 
@@ -184,10 +213,8 @@ func getAndSendResponse(
 		response = "Oh no! Something went wrong."
 	}
 
-	_, err = dg.ChannelMessageSend(dgChannID, response)
-	if err != nil {
-		log.Printf("Could not send discord message on channel %s: %s\n", dgChannID, err)
-	}
+	err = sendChunkedChannelMessage(dg, dgChannID, response)
+	return err
 }
 
 func onPresenceUpdate(dg *discordgo.Session, p *discordgo.PresenceUpdate, s *State, db Database) {
@@ -221,6 +248,10 @@ func onPresenceUpdate(dg *discordgo.Session, p *discordgo.PresenceUpdate, s *Sta
 
 		// this state update must be done before the db call to avoid race conditions
 		s.UpdatePresence(p.User.ID, p.Status, isPlayingGame, "", time.Time{})
+
+		if duration < MIN_GAME_SESSION_DURATION {
+			return
+		}
 
 		userSession := &GameSession{
 			UserID:    p.User.ID,
