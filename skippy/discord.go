@@ -51,44 +51,44 @@ func RunDiscord(
 ) {
 	state := NewState(assistantID, token, stockAPIKey, weatherAPIKey)
 
-	dg, err := discordgo.New("Bot " + token)
+	session, err := discordgo.New("Bot " + token)
 	if err != nil {
 		log.Fatalln("Unable to get discord client")
 	}
-
-	dg.Identify.Intents = discordgo.IntentsAll
-	err = dg.Open()
+	session.Identify.Intents = discordgo.IntentsAll
+	err = session.Open()
 	if err != nil {
 		log.Fatalln("Unable to open discord client", err.Error())
 	}
-	defer dg.Close()
+	defer session.Close()
 
-	dg.State.TrackPresences = true
-	dg.State.TrackChannels = true
-	dg.State.TrackMembers = true
+	session.State.TrackPresences = true
+	session.State.TrackChannels = true
+	session.State.TrackMembers = true
 
-	dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
-		messageCreate(s, m, client, state)
+	dg := NewDiscordBot(session)
+	session.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
+		messageCreate(dg, m, client, state)
 	})
 
-	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	session.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if i.Type == discordgo.InteractionApplicationCommand {
-			onCommand(s, i, client, state, db)
+			onCommand(dg, i, client, state, db)
 		}
 	})
 
 	// discord presence update repeates calls rapidly
 	// might be from multiple servers so debounce the calls
 	debouncer := NewDebouncer(DEBOUNCE_DELAY)
-	dg.AddHandler(func(dg *discordgo.Session, p *discordgo.PresenceUpdate) {
+	session.AddHandler(func(dg *discordgo.Session, p *discordgo.PresenceUpdate) {
 		debouncer.Debounce(p.User.ID, func() {
 			onPresenceUpdate(dg, p, state, db)
 		},
 		)
 	})
-
 	// deleteSlashCommands(dg)
-	initSlashCommands(dg)
+	// TODO: use interface
+	initSlashCommands(session)
 
 	log.Println("Bot is now running. Press CTRL+C to exit.")
 	sc := make(chan os.Signal, 1)
@@ -96,7 +96,7 @@ func RunDiscord(
 	<-sc
 }
 
-func sendChunkedChannelMessage(dg *discordgo.Session, channelID string, message string) error {
+func sendChunkedChannelMessage(dg DiscordSession, channelID string, message string) error {
 	// Discord has a limit of 2000 characters for a single message
 	// If the message is longer than that, we need to split it into chunks
 	for len(message) > 0 {
@@ -116,15 +116,16 @@ func sendChunkedChannelMessage(dg *discordgo.Session, channelID string, message 
 }
 
 func messageCreate(
-	dg *discordgo.Session,
+	dg DiscordSession,
 	m *discordgo.MessageCreate,
 	client *openai.Client,
 	state *State,
 ) {
 	// Ignore all messages created by the bot itself
-	if m.Author.ID == dg.State.User.ID {
-		return
-	}
+	// TODO: fix
+	// if m.Author.ID == dg.State.User.ID {
+	// }
+	// 	return
 
 	log.Printf("Recieved Message: %s\n", m.Content)
 
@@ -150,12 +151,12 @@ func messageCreate(
 
 	role, roleMentioned := isRoleMentioned(dg, m)
 
-	isMentioned := isMentioned(m.Mentions, dg.State.User) || roleMentioned
+	isMentioned := isMentioned(m.Mentions, dg.GetState().User) || roleMentioned
 	if !isMentioned && !thread.alwaysRespond {
 		return
 	}
 
-	message := removeBotMention(m.Content, dg.State.User.ID)
+	message := removeBotMention(m.Content, dg.GetState().User.ID)
 	message = removeRoleMention(message, role)
 	message = replaceChannelIDs(message, m.MentionChannels)
 	message += "\n current time: "
@@ -184,7 +185,7 @@ func messageCreate(
 
 func getAndSendResponse(
 	ctx context.Context,
-	dg *discordgo.Session,
+	dg DiscordSession,
 	dgChannID string,
 	messageReq openai.MessageRequest,
 	additionalInstructions string,

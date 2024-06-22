@@ -112,7 +112,7 @@ func initSlashCommands(dg *discordgo.Session) ([]*discordgo.ApplicationCommand, 
 }
 
 func onCommand(
-	dg *discordgo.Session,
+	dg DiscordSession,
 	i *discordgo.InteractionCreate,
 	client *openai.Client,
 	state *State,
@@ -152,7 +152,7 @@ func onCommand(
 
 }
 func handleSlashCommandError(
-	dg *discordgo.Session,
+	dg DiscordSession,
 	i *discordgo.InteractionCreate,
 	err error,
 ) {
@@ -170,7 +170,7 @@ func handleSlashCommandError(
 	}
 }
 func generateGameStats(
-	dg *discordgo.Session,
+	dg DiscordSession,
 	i *discordgo.InteractionCreate,
 	client *openai.Client,
 	state *State,
@@ -234,7 +234,7 @@ func generateGameStats(
 }
 
 func sendChannelMessage(
-	dg *discordgo.Session,
+	dg DiscordSession,
 	i *discordgo.InteractionCreate,
 	client *openai.Client,
 	state *State,
@@ -298,7 +298,7 @@ func sendChannelMessage(
 }
 
 func handleAlwaysRespond(
-	dg *discordgo.Session,
+	dg DiscordSession,
 	i *discordgo.InteractionCreate,
 	client *openai.Client,
 	state *State,
@@ -323,7 +323,7 @@ func handleAlwaysRespond(
 }
 
 func handleRLSesh(
-	dg *discordgo.Session,
+	dg DiscordSession,
 	i *discordgo.InteractionCreate,
 	client *openai.Client,
 	state *State,

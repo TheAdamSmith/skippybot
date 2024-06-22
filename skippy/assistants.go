@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bwmarrin/discordgo"
 	openai "github.com/sashabaranov/go-openai"
 )
 
@@ -57,7 +56,7 @@ type ReminderFuncArgs struct {
 
 func GetResponse(
 	ctx context.Context,
-	dg *discordgo.Session,
+	dg DiscordSession,
 	threadID string,
 	dgChannID string,
 	messageReq openai.MessageRequest,
@@ -154,7 +153,7 @@ func GetResponse(
 }
 
 func handleRequiresAction(
-	dg *discordgo.Session,
+	dg DiscordSession,
 	run openai.Run,
 	dgChannID string,
 	threadID string,
@@ -247,7 +246,7 @@ outerloop:
 }
 
 func handleGetWeather(
-	dg *discordgo.Session,
+	dg DiscordSession,
 	funcArg FuncArgs,
 	client *openai.Client,
 	state *State,
@@ -273,7 +272,7 @@ func handleGetWeather(
 }
 
 func handleGetStockPrice(
-	dg *discordgo.Session,
+	dg DiscordSession,
 	funcArg FuncArgs,
 	client *openai.Client,
 	state *State,
@@ -298,7 +297,7 @@ func handleGetStockPrice(
 }
 
 func handleMorningMessage(
-	dg *discordgo.Session,
+	dg DiscordSession,
 	funcArg FuncArgs,
 	dgChannID string,
 	client *openai.Client,
@@ -325,7 +324,7 @@ func handleMorningMessage(
 
 func getAndSendImage(
 	ctx context.Context,
-	dg *discordgo.Session,
+	dg DiscordSession,
 	funcArg FuncArgs,
 	channelID string,
 	client *openai.Client,
@@ -353,7 +352,7 @@ func getAndSendImage(
 
 func setReminder(
 	ctx context.Context,
-	dg *discordgo.Session,
+	dg DiscordSession,
 	funcArg FuncArgs,
 	channelID string,
 	client *openai.Client,
@@ -396,7 +395,7 @@ func setReminder(
 }
 
 func waitForReminderResponse(
-	dg *discordgo.Session,
+	dg DiscordSession,
 	channelID string,
 	userID string,
 	client *openai.Client,
@@ -463,7 +462,7 @@ func mention(userID string) string {
 }
 
 func toggleMorningMsg(
-	dg *discordgo.Session,
+	dg DiscordSession,
 	morningMsgFuncArgs MorningMsgFuncArgs,
 	channelID string,
 	client *openai.Client,
@@ -530,7 +529,7 @@ func toggleMorningMsg(
 // TODO: group all timer calls into a common scheduler
 func startMorningMessageLoop(
 	ctx context.Context,
-	dg *discordgo.Session,
+	dg DiscordSession,
 	morningMsgFuncArgs MorningMsgFuncArgs,
 	duration time.Duration,
 	channelID string,

@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bwmarrin/discordgo"
 	"github.com/sashabaranov/go-openai"
 )
 
@@ -41,7 +40,7 @@ func StartRocketLeagueSession(
 	ctx context.Context,
 	filePath string,
 	channelID string,
-	dg *discordgo.Session,
+	dg DiscordSession,
 	state *State,
 	client *openai.Client,
 ) error {
