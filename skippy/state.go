@@ -13,7 +13,7 @@ import (
 
 type State struct {
 	threadMap       map[string]*chatThread
-	userPresenceMap map[string]*userPresence
+	userPresenceMap map[string]userPresence
 	assistantID     string
 	mu              sync.RWMutex
 	discordToken    string
@@ -47,7 +47,7 @@ func NewState(
 ) *State {
 	return &State{
 		threadMap:       make(map[string]*chatThread),
-		userPresenceMap: make(map[string]*userPresence),
+		userPresenceMap: make(map[string]userPresence),
 		assistantID:     assistantID,
 		discordToken:    discordToken,
 		stockApiKey:     stockApiKey,
@@ -111,22 +111,20 @@ func (s *State) UpdatePresence(
 ) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, exists := s.userPresenceMap[userID]
-	if !exists {
-		s.userPresenceMap[userID] = &userPresence{}
+	s.userPresenceMap[userID] = userPresence{
+		status:        status,
+		isPlayingGame: isPlayingGame,
+		game:          game,
+		timeStarted:   timeStarted,
 	}
-	s.userPresenceMap[userID].status = status
-	s.userPresenceMap[userID].isPlayingGame = isPlayingGame
-	s.userPresenceMap[userID].game = game
-	s.userPresenceMap[userID].timeStarted = timeStarted
 }
 
-func (s *State) GetPresence(userID string) (*userPresence, bool) {
+func (s *State) GetPresence(userID string) (userPresence, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	presence, exists := s.userPresenceMap[userID]
 	if !exists {
-		return nil, false
+		return userPresence{}, false
 	}
 	return presence, true
 }

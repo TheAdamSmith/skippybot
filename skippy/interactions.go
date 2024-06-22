@@ -17,6 +17,11 @@ const (
 	ALWAYS_RESPOND = "always_respond"
 	SEND_MESSAGE   = "send_message"
 	GAME_STATS     = "game_stats"
+	CHANNEL        = "channel"
+	MESSAGE        = "message"
+	MENTION        = "mention"
+	DAYS           = "days"
+	START_OR_STOP  = "startorstop"
 )
 
 func initSlashCommands(dg *discordgo.Session) ([]*discordgo.ApplicationCommand, error) {
@@ -27,19 +32,19 @@ func initSlashCommands(dg *discordgo.Session) ([]*discordgo.ApplicationCommand, 
 		Options: []*discordgo.ApplicationCommandOption{
 			{
 				Type:        discordgo.ApplicationCommandOptionChannel,
-				Name:        "channel",
+				Name:        CHANNEL,
 				Description: "channel to send message on",
 				Required:    true,
 			},
 			{
 				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        "message",
+				Name:        MESSAGE,
 				Description: "message to send",
 				Required:    true,
 			},
 			{
 				Type:        discordgo.ApplicationCommandOptionMentionable,
-				Name:        "mention",
+				Name:        MENTION,
 				Description: "anyone to mention",
 				Required:    false,
 			},
@@ -68,6 +73,14 @@ func initSlashCommands(dg *discordgo.Session) ([]*discordgo.ApplicationCommand, 
 	command = discordgo.ApplicationCommand{
 		Name:        GAME_STATS,
 		Description: "Get your game stats",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionInteger,
+				Name:        DAYS,
+				Description: "Number of days to get stats for. Defaults to 7 ",
+				Required:    false,
+			},
+		},
 	}
 
 	applicationCommand, err = dg.ApplicationCommandCreate(dg.State.User.ID, "", &command)
@@ -82,7 +95,7 @@ func initSlashCommands(dg *discordgo.Session) ([]*discordgo.ApplicationCommand, 
 		Options: []*discordgo.ApplicationCommandOption{
 			{
 				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        "startorstop",
+				Name:        START_OR_STOP,
 				Description: "should be either start or stop",
 				Required:    false,
 			},
@@ -108,13 +121,20 @@ func onCommand(
 	log.Println(i.ApplicationCommandData().Name)
 	switch i.ApplicationCommandData().Name {
 	case RL_SESH:
-		handleRLSesh(dg, i, client, state)
+		if err := handleRLSesh(dg, i, client, state); err != nil {
+			handleSlashCommandError(dg, i, err)
+		}
 	case ALWAYS_RESPOND:
+		// should not error
 		handleAlwaysRespond(dg, i, client, state)
 	case SEND_MESSAGE:
-		sendChannelMessage(dg, i, client, state)
+		if err := sendChannelMessage(dg, i, client, state); err != nil {
+			handleSlashCommandError(dg, i, err)
+		}
 	case GAME_STATS:
-		generateGameStats(dg, i, client, state, db)
+		if err := generateGameStats(dg, i, client, state, db); err != nil {
+			handleSlashCommandError(dg, i, err)
+		}
 	default:
 		log.Println("recieved unrecognized command")
 		err := dg.InteractionRespond(i.Interaction,
@@ -131,7 +151,24 @@ func onCommand(
 	}
 
 }
-
+func handleSlashCommandError(
+	dg *discordgo.Session,
+	i *discordgo.InteractionCreate,
+	err error,
+) {
+	log.Println("Error processing command: ", err)
+	err = dg.InteractionRespond(i.Interaction,
+		&discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "Error processing command",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+	if err != nil {
+		log.Printf("Error responding to slash command: %s\n", err)
+	}
+}
 func generateGameStats(
 	dg *discordgo.Session,
 	i *discordgo.InteractionCreate,
@@ -139,16 +176,29 @@ func generateGameStats(
 	state *State,
 	db Database,
 ) error {
-	sessions, err := db.GetGameSessionsByUser(i.Member.User.ID)
+	daysAgo := 7
+	optionValue, exists := findCommandOption(i.ApplicationCommandData().Options, DAYS)
+	if exists {
+		daysAgo = int(optionValue.IntValue())
+	}
+
+	sessions, err := db.GetGameSessionsByUserAndDays(i.Member.User.ID, daysAgo)
 	if err != nil {
 		log.Println("Unable to get game sessions: ", err)
 		return err
 	}
 
-	jsonData, err := json.Marshal(sessions.ToGameSessionAI())
-	if err != nil {
-		log.Println("Unable to marshal json: ", err)
-		return err
+	aiGameSessions := sessions.ToGameSessionAI()
+	content := ""
+	if aiGameSessions == nil {
+		content = "Please respond saying that there were no games found for this user"
+	} else {
+		jsonData, err := json.Marshal(aiGameSessions)
+		if err != nil {
+			log.Println("Unable to marshal json: ", err)
+			return err
+		}
+		content = string(jsonData)
 	}
 
 	// respond before sending response to maintain consistent
@@ -168,7 +218,7 @@ func generateGameStats(
 
 	messageReq := openai.MessageRequest{
 		Role:    openai.ChatMessageRoleUser,
-		Content: string(jsonData),
+		Content: content,
 	}
 	ctx := context.WithValue(context.Background(), DisableFunctions, true)
 	go getAndSendResponse(
@@ -182,27 +232,31 @@ func generateGameStats(
 	)
 	return nil
 }
+
 func sendChannelMessage(
 	dg *discordgo.Session,
 	i *discordgo.InteractionCreate,
 	client *openai.Client,
 	state *State,
 ) error {
-	options := i.ApplicationCommandData().Options
-	if len(options) < 2 {
-		return fmt.Errorf("recieved an incorrect amount of options")
+	optionValue, exists := findCommandOption(i.ApplicationCommandData().Options, CHANNEL)
+	if !exists {
+		return fmt.Errorf("unable to find slash command option %s", CHANNEL)
 	}
-
-	channel := options[0].ChannelValue(nil)
+	channel := optionValue.ChannelValue(nil)
 	channelID := channel.ID
 
-	prompt := options[1].StringValue()
+	optionValue, exists = findCommandOption(i.ApplicationCommandData().Options, MESSAGE)
+	if !exists {
+		return fmt.Errorf("unable to find slash command option %s", MESSAGE)
+	}
+	prompt := optionValue.StringValue()
 	var mentionString string
 
-	if len(options) > 2 {
-		mention := options[2].UserValue(nil)
-		mentionString = mention.Mention()
-		log.Println(mentionString)
+	// this one is optional
+	optionValue, exists = findCommandOption(i.ApplicationCommandData().Options, MESSAGE)
+	if exists {
+		mentionString = optionValue.StringValue()
 	}
 
 	message := "prompt: " + prompt + "\n"
@@ -273,32 +327,20 @@ func handleRLSesh(
 	i *discordgo.InteractionCreate,
 	client *openai.Client,
 	state *State,
-) {
+) error {
 
-	if i.ApplicationCommandData().Name != "rl_sesh" {
-		return
+	optionValue, exists := findCommandOption(i.ApplicationCommandData().Options, START_OR_STOP)
+	if !exists {
+		return fmt.Errorf("unable to find slash command option")
 	}
 
-	// TODO: find specific command
-	// maybe add option to discord package?
-	textOption := i.ApplicationCommandData().Options[0].Value // rl_sesh
+	textOption := optionValue.StringValue()
 	if textOption == "start" {
 		log.Println("Handling rl_sesh start command. creating new thread")
 
 		err := state.ResetOpenAIThread(i.ChannelID, client)
 		if err != nil {
-			log.Println("Unable to create thread: ", err)
-			err = dg.InteractionRespond(i.Interaction,
-				&discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Content: "Unable to start chat thread",
-					},
-				})
-			if err != nil {
-				log.Printf("Error responding to slash command: %s\n", err)
-			}
-			return
+			return err
 		}
 
 		ctx, cancelFunc := context.WithCancel(context.Background())
@@ -348,7 +390,19 @@ func handleRLSesh(
 			log.Printf("Error responding to slash command: %s\n", err)
 		}
 	}
+	return nil
+}
 
+func findCommandOption(
+	options []*discordgo.ApplicationCommandInteractionDataOption,
+	name string,
+) (*discordgo.ApplicationCommandInteractionDataOption, bool) {
+	for _, option := range options {
+		if option.Name == name {
+			return option, true
+		}
+	}
+	return nil, false
 }
 
 //lint:ignore U1000 saving for later
