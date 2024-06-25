@@ -54,7 +54,7 @@ func isRoleMentioned(dg DiscordSession, m *discordgo.MessageCreate) (string, boo
 
 func isMentioned(mentions []*discordgo.User, currUser *discordgo.User) bool {
 	for _, user := range mentions {
-		if user.Username == currUser.Username {
+		if user.ID == currUser.ID {
 			return true
 		}
 	}

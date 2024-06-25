@@ -458,7 +458,7 @@ func mention(userID string) string {
 	if strings.HasPrefix(userID, "<@") && strings.HasSuffix(userID, ">") {
 		return userID
 	}
-	return fmt.Sprint("<@%s>", userID)
+	return fmt.Sprintf("<@%s>", userID)
 }
 
 func toggleMorningMsg(

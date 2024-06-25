@@ -122,10 +122,9 @@ func messageCreate(
 	state *State,
 ) {
 	// Ignore all messages created by the bot itself
-	// TODO: fix
-	// if m.Author.ID == dg.State.User.ID {
-	// }
-	// 	return
+	if m.Author.ID == dg.GetState().User.ID {
+		return
+	}
 
 	log.Printf("Recieved Message: %s\n", m.Content)
 
