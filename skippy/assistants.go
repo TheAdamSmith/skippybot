@@ -433,7 +433,7 @@ func waitForReminderResponse(
 		// TODO: maybe add this to additional_instruction
 		message := fmt.Sprintf(
 			"It looks %s haven't responsed to this reminder can you generate a response nagging them about it. This is not a tool request.",
-			mention(userID),
+			Mention(userID),
 		)
 
 		messageReq := openai.MessageRequest{
@@ -454,7 +454,7 @@ func waitForReminderResponse(
 
 }
 
-func mention(userID string) string {
+func Mention(userID string) string {
 	if strings.HasPrefix(userID, "<@") && strings.HasSuffix(userID, ">") {
 		return userID
 	}
@@ -485,12 +485,19 @@ func toggleMorningMsg(
 		return "worked"
 	}
 
-	const timeFmt = "15:04"
+	// TODO: this is hacky
+	// this should be fixed in the ai funciton definition
+	timeFmt := "15:04"
 	log.Println("Given time is: ", morningMsgFuncArgs.Time)
 	givenTime, err := time.Parse(timeFmt, morningMsgFuncArgs.Time)
 	if err != nil {
-		log.Println("could not format time: ", err)
-		return "could not format time"
+		log.Printf("could not format time: %s. attempting to use AM/PM format", err)
+		timeFmt := "3:04 PM"
+		givenTime, err = time.Parse(timeFmt, morningMsgFuncArgs.Time)
+		if err != nil {
+			log.Printf("could not format time: %s.", err)
+			return "could not format time"
+		}
 
 	}
 

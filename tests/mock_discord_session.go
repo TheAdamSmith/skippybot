@@ -1,11 +1,12 @@
-package skippy
+package tests
 
 import (
+	"log"
+
 	"github.com/bwmarrin/discordgo"
 )
 
 // FOR TESTING
-// TODO: put in seperate file
 type MockDiscordSession struct {
 	channelMessages     map[string][]string
 	channelTypingCalled map[string]bool
@@ -45,6 +46,7 @@ func (m *MockDiscordSession) InteractionRespond(
 	resp *discordgo.InteractionResponse,
 	options ...discordgo.RequestOption,
 ) error {
+	log.Println("InteractionRespond")
 	return nil
 }
 func (m *MockDiscordSession) GetState() *discordgo.State {

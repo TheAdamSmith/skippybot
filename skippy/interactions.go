@@ -243,6 +243,7 @@ func sendChannelMessage(
 	if !exists {
 		return fmt.Errorf("unable to find slash command option %s", CHANNEL)
 	}
+
 	channel := optionValue.ChannelValue(nil)
 	channelID := channel.ID
 
@@ -250,18 +251,21 @@ func sendChannelMessage(
 	if !exists {
 		return fmt.Errorf("unable to find slash command option %s", MESSAGE)
 	}
+
 	prompt := optionValue.StringValue()
+
 	var mentionString string
 
 	// this one is optional
-	optionValue, exists = findCommandOption(i.ApplicationCommandData().Options, MESSAGE)
+	optionValue, exists = findCommandOption(i.ApplicationCommandData().Options, MENTION)
 	if exists {
 		mentionString = optionValue.StringValue()
 	}
-
+	log.Println("mention string:", mentionString)
 	message := "prompt: " + prompt + "\n"
+	// TODO: put into instructions
 	if mentionString != "" {
-		message += "User ID :" + mentionString
+		message += "User ID :" + Mention(mentionString)
 	}
 
 	messageReq := openai.MessageRequest{
