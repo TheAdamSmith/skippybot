@@ -22,10 +22,10 @@ type State struct {
 }
 
 type userPresence struct {
-	status        discordgo.Status
-	isPlayingGame bool
-	game          string
-	timeStarted   time.Time
+	Status        discordgo.Status
+	IsPlayingGame bool
+	Game          string
+	TimeStarted   time.Time
 }
 
 type chatThread struct {
@@ -119,10 +119,10 @@ func (s *State) UpdatePresence(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.userPresenceMap[userID] = userPresence{
-		status:        status,
-		isPlayingGame: isPlayingGame,
-		game:          game,
-		timeStarted:   timeStarted,
+		Status:        status,
+		IsPlayingGame: isPlayingGame,
+		Game:          game,
+		TimeStarted:   timeStarted,
 	}
 }
 

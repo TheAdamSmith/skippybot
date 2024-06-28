@@ -80,7 +80,7 @@ func RunDiscord(
 	// discord presence update repeates calls rapidly
 	// might be from multiple servers so debounce the calls
 	debouncer := NewDebouncer(DEBOUNCE_DELAY)
-	session.AddHandler(func(dg *discordgo.Session, p *discordgo.PresenceUpdate) {
+	session.AddHandler(func(s *discordgo.Session, p *discordgo.PresenceUpdate) {
 		debouncer.Debounce(p.User.ID, func() {
 			onPresenceUpdate(dg, p, state, db)
 		},
@@ -217,18 +217,33 @@ func getAndSendResponse(
 	return err
 }
 
-func onPresenceUpdate(dg *discordgo.Session, p *discordgo.PresenceUpdate, s *State, db Database) {
+func onPresenceUpdateDebounce(
+	dg DiscordSession,
+	p *discordgo.PresenceUpdate,
+	s *State,
+	db Database,
+	debouncer *Debouncer,
+) {
+	debouncer.Debounce(p.User.ID, func() {
+		onPresenceUpdate(dg, p, s, db)
+	})
+}
+
+func onPresenceUpdate(dg DiscordSession, p *discordgo.PresenceUpdate, s *State, db Database) {
+
 	game, isPlayingGame := getCurrentGame(p)
 	isPlayingGame = isPlayingGame && game != ""
 
 	userPresence, exists := s.GetPresence(p.User.ID)
 
-	member, err := dg.State.Member(p.GuildID, p.User.ID)
+	member, err := dg.GetState().Member(p.GuildID, p.User.ID)
 	if err != nil {
 		log.Println("Could not get user: ", err)
+		return
 	}
-	startedPlaying := isPlayingGame && (!exists || exists && !userPresence.isPlayingGame)
-	stoppedPlaying := exists && userPresence.isPlayingGame && !isPlayingGame
+
+	startedPlaying := isPlayingGame && (!exists || exists && !userPresence.IsPlayingGame)
+	stoppedPlaying := exists && userPresence.IsPlayingGame && !isPlayingGame
 
 	if startedPlaying {
 		log.Printf("User %s started playing %s\n", member.User.Username, game)
@@ -237,16 +252,17 @@ func onPresenceUpdate(dg *discordgo.Session, p *discordgo.PresenceUpdate, s *Sta
 
 	if stoppedPlaying {
 
-		duration := time.Since(userPresence.timeStarted)
+		duration := time.Since(userPresence.TimeStarted)
 
 		log.Printf(
 			"User %s stopped playing game %s, after %s\n",
 			member.User.Username,
-			userPresence.game,
+			userPresence.Game,
 			duration,
 		)
 
 		// this state update must be done before the db call to avoid race conditions
+		// later me: probably not required cuz debounced now
 		s.UpdatePresence(p.User.ID, p.Status, isPlayingGame, "", time.Time{})
 
 		if duration < MIN_GAME_SESSION_DURATION {
@@ -255,8 +271,8 @@ func onPresenceUpdate(dg *discordgo.Session, p *discordgo.PresenceUpdate, s *Sta
 
 		userSession := &GameSession{
 			UserID:    p.User.ID,
-			Game:      userPresence.game,
-			StartedAt: userPresence.timeStarted,
+			Game:      userPresence.Game,
+			StartedAt: userPresence.TimeStarted,
 			Duration:  duration,
 		}
 

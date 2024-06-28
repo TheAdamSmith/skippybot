@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -29,9 +30,17 @@ var client *openai.Client
 var state *skippy.State
 var dg *MockDiscordSession
 var db skippy.Database
+var enableLogging bool
+
+func init() {
+	flag.BoolVar(&enableLogging, "log", false, "enable logging")
+}
 
 func TestMain(m *testing.M) {
-	log.SetOutput(io.Discard)
+	flag.Parse()
+	if !enableLogging {
+		log.SetOutput(io.Discard)
+	}
 	var err error
 	dg, client, state, db, err = setup()
 	if err != nil {

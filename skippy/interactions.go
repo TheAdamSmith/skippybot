@@ -169,6 +169,7 @@ func handleSlashCommandError(
 		log.Printf("Error responding to slash command: %s\n", err)
 	}
 }
+
 func generateGameStats(
 	dg DiscordSession,
 	i *discordgo.InteractionCreate,
