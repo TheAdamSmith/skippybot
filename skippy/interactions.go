@@ -24,7 +24,9 @@ const (
 	START_OR_STOP  = "startorstop"
 )
 
-func initSlashCommands(dg *discordgo.Session) ([]*discordgo.ApplicationCommand, error) {
+func initSlashCommands(
+	dg *discordgo.Session,
+) ([]*discordgo.ApplicationCommand, error) {
 	var commands []*discordgo.ApplicationCommand
 	command := discordgo.ApplicationCommand{
 		Name:        SEND_MESSAGE,
@@ -51,7 +53,11 @@ func initSlashCommands(dg *discordgo.Session) ([]*discordgo.ApplicationCommand, 
 		},
 	}
 
-	applicationCommand, err := dg.ApplicationCommandCreate(dg.State.User.ID, "", &command)
+	applicationCommand, err := dg.ApplicationCommandCreate(
+		dg.State.User.ID,
+		"",
+		&command,
+	)
 	commands = append(commands, applicationCommand)
 
 	if err != nil {
@@ -63,7 +69,11 @@ func initSlashCommands(dg *discordgo.Session) ([]*discordgo.ApplicationCommand, 
 		Description: "Toggle auto respond when on Skippy will always respond to messages in this channel",
 	}
 
-	applicationCommand, err = dg.ApplicationCommandCreate(dg.State.User.ID, "", &command)
+	applicationCommand, err = dg.ApplicationCommandCreate(
+		dg.State.User.ID,
+		"",
+		&command,
+	)
 	commands = append(commands, applicationCommand)
 
 	if err != nil {
@@ -83,7 +93,11 @@ func initSlashCommands(dg *discordgo.Session) ([]*discordgo.ApplicationCommand, 
 		},
 	}
 
-	applicationCommand, err = dg.ApplicationCommandCreate(dg.State.User.ID, "", &command)
+	applicationCommand, err = dg.ApplicationCommandCreate(
+		dg.State.User.ID,
+		"",
+		&command,
+	)
 	commands = append(commands, applicationCommand)
 
 	if err != nil {
@@ -102,7 +116,11 @@ func initSlashCommands(dg *discordgo.Session) ([]*discordgo.ApplicationCommand, 
 		},
 	}
 
-	applicationCommand, err = dg.ApplicationCommandCreate(dg.State.User.ID, "", &command)
+	applicationCommand, err = dg.ApplicationCommandCreate(
+		dg.State.User.ID,
+		"",
+		&command,
+	)
 	commands = append(commands, applicationCommand)
 	if err != nil {
 		log.Println("error creating application command: ", err)
@@ -180,7 +198,10 @@ func generateGameStats(
 	config *Config,
 ) error {
 	daysAgo := 7
-	optionValue, exists := findCommandOption(i.ApplicationCommandData().Options, DAYS)
+	optionValue, exists := findCommandOption(
+		i.ApplicationCommandData().Options,
+		DAYS,
+	)
 	if exists {
 		daysAgo = int(optionValue.IntValue())
 	}
@@ -244,7 +265,10 @@ func sendChannelMessage(
 	state *State,
 	config *Config,
 ) error {
-	optionValue, exists := findCommandOption(i.ApplicationCommandData().Options, CHANNEL)
+	optionValue, exists := findCommandOption(
+		i.ApplicationCommandData().Options,
+		CHANNEL,
+	)
 	if !exists {
 		return fmt.Errorf("unable to find slash command option %s", CHANNEL)
 	}
@@ -252,7 +276,10 @@ func sendChannelMessage(
 	channel := optionValue.ChannelValue(nil)
 	channelID := channel.ID
 
-	optionValue, exists = findCommandOption(i.ApplicationCommandData().Options, MESSAGE)
+	optionValue, exists = findCommandOption(
+		i.ApplicationCommandData().Options,
+		MESSAGE,
+	)
 	if !exists {
 		return fmt.Errorf("unable to find slash command option %s", MESSAGE)
 	}
@@ -262,30 +289,48 @@ func sendChannelMessage(
 	var mentionString string
 
 	// this one is optional
-	optionValue, exists = findCommandOption(i.ApplicationCommandData().Options, MENTION)
+	optionValue, exists = findCommandOption(
+		i.ApplicationCommandData().Options,
+		MENTION,
+	)
 	if exists {
-		mentionString = optionValue.StringValue()
-	}
-	log.Println("mention string:", mentionString)
-	message := "prompt: " + prompt + "\n"
-	// TODO: put into instructions
-	if mentionString != "" {
-		message += "User ID :" + Mention(mentionString)
+		// Can also call Guild() on session
+		// that fetches from discord api but the state guild seems suffecient
+		guild, err := dg.GetState().Guild(i.GuildID)
+		if err != nil {
+			log.Println("Could not get guild", err)
+			return err
+		}
+		mentionString, err = getMentionableMention(optionValue, guild)
+		if err != nil {
+			log.Println("Could not get mention", err)
+		}
 	}
 
+	message := "prompt: " + prompt + "\n"
+	log.Println("message", message)
 	messageReq := openai.MessageRequest{
 		Role:    openai.ChatMessageRoleUser,
 		Content: message,
 	}
 
-	ctx := context.WithValue(context.Background(), DisableFunctions, true)
+	instructions := SEND_CHANNEL_MSG_INSTRUCTIONS
+	if mentionString != "" {
+		log.Println("mention string: ", mentionString)
+		// TODO: not sure if the explicit instructions are necessary
+		instructions += fmt.Sprintf(
+			"Please include this direct string in your message: %s. Do not modify it. Ignore any previously used mentions or id's",
+			mentionString,
+		)
+	}
 
+	ctx := context.WithValue(context.Background(), DisableFunctions, true)
 	go getAndSendResponse(
 		ctx,
 		dg,
 		channelID,
 		messageReq,
-		SEND_CHANNEL_MSG_INSTRUCTIONS,
+		instructions,
 		client,
 		state,
 		config,
@@ -340,7 +385,10 @@ func handleRLSesh(
 	config *Config,
 ) error {
 
-	optionValue, exists := findCommandOption(i.ApplicationCommandData().Options, START_OR_STOP)
+	optionValue, exists := findCommandOption(
+		i.ApplicationCommandData().Options,
+		START_OR_STOP,
+	)
 	if !exists {
 		return fmt.Errorf("unable to find slash command option")
 	}
@@ -359,7 +407,15 @@ func handleRLSesh(
 
 		message := "Started rocket league session"
 		filePath := os.Getenv("RL_DIR")
-		err = StartRocketLeagueSession(ctx, filePath, i.ChannelID, dg, state, client, config)
+		err = StartRocketLeagueSession(
+			ctx,
+			filePath,
+			i.ChannelID,
+			dg,
+			state,
+			client,
+			config,
+		)
 		if err != nil {
 			message = "unable to start rocket leage session"
 		}
@@ -416,6 +472,27 @@ func findCommandOption(
 	return nil, false
 }
 
+func getMentionableMention(
+	optionValue *discordgo.ApplicationCommandInteractionDataOption,
+	guild *discordgo.Guild,
+) (string, error) {
+	mentionID, ok := optionValue.Value.(string)
+	if !ok {
+		return "", fmt.Errorf("error casting optionValue to string")
+	}
+	for _, role := range guild.Roles {
+		if role.ID == mentionID {
+			// TODO: move to constants
+			if role.Name == "@everyone" {
+				return role.Name, nil
+			} else {
+				return role.Mention(), nil
+			}
+		}
+	}
+	return Mention(mentionID), nil
+}
+
 //lint:ignore U1000 saving for later
 func deleteSlashCommands(dg *discordgo.Session) error {
 	appCommands, err := dg.ApplicationCommands(dg.State.Application.ID, "")
@@ -428,7 +505,11 @@ func deleteSlashCommands(dg *discordgo.Session) error {
 	}
 
 	for _, appCommand := range appCommands {
-		err = dg.ApplicationCommandDelete(dg.State.Application.ID, "", appCommand.ID)
+		err = dg.ApplicationCommandDelete(
+			dg.State.Application.ID,
+			"",
+			appCommand.ID,
+		)
 		if err != nil {
 			log.Println("Could not delete command", err)
 			return err

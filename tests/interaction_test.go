@@ -51,6 +51,7 @@ func TestSendChannelMessage(t *testing.T) {
 
 	interaction := &discordgo.InteractionCreate{
 		Interaction: &discordgo.Interaction{
+			GuildID:   GUILD_ID,
 			Type:      discordgo.InteractionApplicationCommand,
 			ChannelID: channelID_1,
 			Data: discordgo.ApplicationCommandInteractionData{
