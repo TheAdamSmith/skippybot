@@ -4,12 +4,18 @@ import (
 	"io"
 	"log"
 	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 
 	skippy "skippybot/skippy"
 
 	openai "github.com/sashabaranov/go-openai"
+)
+
+const (
+	DEBOUNCE_DELAY            = 100 * time.Millisecond
+	MIN_GAME_SESSION_DURATION = 10 * time.Minute
 )
 
 func main() {
@@ -58,5 +64,25 @@ func main() {
 	if err != nil {
 		log.Fatalln("Unable to get database connection", err)
 	}
-	skippy.RunDiscord(token, assistantID, stockPriceAPIKey, weatherAPIKey, client, db)
+
+	config := &skippy.Config{
+		PresenceUpdateDebouncDelay: DEBOUNCE_DELAY,
+		MinGameSessionDuration:     MIN_GAME_SESSION_DURATION,
+		ReminderDurations: []time.Duration{
+			time.Minute * 10,
+			time.Minute * 30,
+			time.Minute * 90,
+			time.Hour * 3,
+		},
+		OpenAIModel: openai.GPT4o,
+	}
+
+	skippy.RunDiscord(
+		token,
+		assistantID,
+		stockPriceAPIKey,
+		weatherAPIKey,
+		client,
+		config,
+		db)
 }

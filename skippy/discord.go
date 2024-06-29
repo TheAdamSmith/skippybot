@@ -36,17 +36,13 @@ const GENERATE_GAME_STAT_INSTRUCTIONS = `You are summarizing a users game sessio
 	This is the user mention (%s) of the user you are summarizing. Please include it in your message.
 	`
 
-const (
-	DEBOUNCE_DELAY            = 100 * time.Millisecond
-	MIN_GAME_SESSION_DURATION = 10 * time.Minute
-)
-
 func RunDiscord(
 	token string,
 	assistantID string,
 	stockAPIKey string,
 	weatherAPIKey string,
 	client *openai.Client,
+	config *Config,
 	db Database,
 ) {
 	state := NewState(assistantID, token, stockAPIKey, weatherAPIKey)
@@ -68,26 +64,26 @@ func RunDiscord(
 
 	dg := NewDiscordBot(session)
 	session.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
-		messageCreate(dg, m, client, state)
+		messageCreate(dg, m, client, state, config)
 	})
 
 	session.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if i.Type == discordgo.InteractionApplicationCommand {
-			onCommand(dg, i, client, state, db)
+			onCommand(dg, i, client, state, db, config)
 		}
 	})
 
 	// discord presence update repeates calls rapidly
 	// might be from multiple servers so debounce the calls
-	debouncer := NewDebouncer(DEBOUNCE_DELAY)
+	debouncer := NewDebouncer(config.PresenceUpdateDebouncDelay)
 	session.AddHandler(func(s *discordgo.Session, p *discordgo.PresenceUpdate) {
 		debouncer.Debounce(p.User.ID, func() {
-			onPresenceUpdate(dg, p, state, db)
+			onPresenceUpdate(dg, p, state, db, config)
 		},
 		)
 	})
+
 	// deleteSlashCommands(dg)
-	// TODO: use interface
 	initSlashCommands(session)
 
 	log.Println("Bot is now running. Press CTRL+C to exit.")
@@ -120,6 +116,7 @@ func messageCreate(
 	m *discordgo.MessageCreate,
 	client *openai.Client,
 	state *State,
+	config *Config,
 ) {
 	// Ignore all messages created by the bot itself
 	if m.Author.ID == dg.GetState().User.ID {
@@ -143,6 +140,7 @@ func messageCreate(
 			DEFAULT_INSTRUCTIONS,
 			client,
 			state,
+			config,
 		)
 		// value used by reminders to see if it needs to send another message to user
 		state.SetAwaitsResponse(m.ChannelID, false, client)
@@ -179,6 +177,7 @@ func messageCreate(
 		DEFAULT_INSTRUCTIONS,
 		client,
 		state,
+		config,
 	)
 }
 
@@ -189,7 +188,9 @@ func getAndSendResponse(
 	messageReq openai.MessageRequest,
 	additionalInstructions string,
 	client *openai.Client,
-	state *State) error {
+	state *State,
+	config *Config,
+) error {
 	dg.ChannelTyping(dgChannID)
 
 	log.Printf("Using message: %s\n", messageReq.Content)
@@ -204,9 +205,10 @@ func getAndSendResponse(
 		thread.openAIThread.ID,
 		dgChannID,
 		messageReq,
-		state,
-		client,
 		additionalInstructions,
+		client,
+		state,
+		config,
 	)
 	if err != nil {
 		log.Println("Unable to get response: ", err)
@@ -223,13 +225,14 @@ func onPresenceUpdateDebounce(
 	s *State,
 	db Database,
 	debouncer *Debouncer,
+	config *Config,
 ) {
 	debouncer.Debounce(p.User.ID, func() {
-		onPresenceUpdate(dg, p, s, db)
+		onPresenceUpdate(dg, p, s, db, config)
 	})
 }
 
-func onPresenceUpdate(dg DiscordSession, p *discordgo.PresenceUpdate, s *State, db Database) {
+func onPresenceUpdate(dg DiscordSession, p *discordgo.PresenceUpdate, s *State, db Database, config *Config) {
 
 	game, isPlayingGame := getCurrentGame(p)
 	isPlayingGame = isPlayingGame && game != ""
@@ -265,7 +268,7 @@ func onPresenceUpdate(dg DiscordSession, p *discordgo.PresenceUpdate, s *State, 
 		// later me: probably not required cuz debounced now
 		s.UpdatePresence(p.User.ID, p.Status, isPlayingGame, "", time.Time{})
 
-		if duration < MIN_GAME_SESSION_DURATION {
+		if duration < config.MinGameSessionDuration {
 			return
 		}
 

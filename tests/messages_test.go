@@ -9,6 +9,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
+// TODO test large message
 func TestMessageCreateNoMention(t *testing.T) {
 	t.Parallel()
 	content := "test"
@@ -24,7 +25,7 @@ func TestMessageCreateNoMention(t *testing.T) {
 		},
 	}
 
-	skippy.MessageCreate(dg, msg, client, state)
+	skippy.MessageCreate(dg, msg, client, state, config)
 	if len(dg.channelMessages[channelID]) > 0 {
 		t.Error("Expected ChannelMessageSend to not be called")
 	}
@@ -53,7 +54,7 @@ func TestMessageCreateWithMention(t *testing.T) {
 		},
 	}
 
-	skippy.MessageCreate(dg, msg, client, state)
+	skippy.MessageCreate(dg, msg, client, state, config)
 	if len(dg.channelMessages[channelID]) != 1 {
 		t.Error("Expected ChannelMessageSend to be called")
 	}
@@ -84,11 +85,11 @@ func TestCreateReminder(t *testing.T) {
 		},
 	}
 
-	skippy.MessageCreate(dg, msg, client, state)
+	skippy.MessageCreate(dg, msg, client, state, config)
 
 	// wait for reminder
 	time.Sleep(2 * time.Second)
-	if len(dg.channelMessages[channelID]) != 2 {
+	if len(dg.channelMessages[channelID]) != 4 {
 		t.Error("Expected ChannelMessageSend to be called twice")
 	}
 
@@ -111,8 +112,8 @@ func TestCreateReminder(t *testing.T) {
 		},
 	}
 
-	skippy.MessageCreate(dg, msg, client, state)
-	if len(dg.channelMessages[channelID]) != 3 {
+	skippy.MessageCreate(dg, msg, client, state, config)
+	if len(dg.channelMessages[channelID]) != 5 {
 		t.Error("Expected ChannelMessageSend to be called again")
 	}
 
@@ -149,7 +150,7 @@ func TestToggleMorningMessage(t *testing.T) {
 		},
 	}
 
-	skippy.MessageCreate(dg, msg, client, state)
+	skippy.MessageCreate(dg, msg, client, state, config)
 
 	// wait for reminder
 	timer := time.NewTimer(2 * time.Minute)
@@ -197,7 +198,7 @@ loop:
 		},
 	}
 
-	skippy.MessageCreate(dg, msg, client, state)
+	skippy.MessageCreate(dg, msg, client, state, config)
 
 	if len(dg.channelMessages[channelID]) != 3 {
 		t.Error("Expected morning message to be canceled")

@@ -20,16 +20,21 @@ import (
 )
 
 const (
-	BOT_ID  = "BOT"
-	letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	BOT_ID   = "BOT"
+	letters  = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	USERNAME = "cap_lapse"
+	GAME     = "Outer Wilds"
+	USER_ID  = "USERID"
+	GUILD_ID = "GUILDID"
 )
 
-// these variable are shared between tests which is inentional
+// these variables are shared between tests which is intentional
 // they simulate a live discord environment
 var client *openai.Client
 var state *skippy.State
 var dg *MockDiscordSession
 var db skippy.Database
+var config *skippy.Config
 var enableLogging bool
 
 func init() {
@@ -42,7 +47,8 @@ func TestMain(m *testing.M) {
 		log.SetOutput(io.Discard)
 	}
 	var err error
-	dg, client, state, db, err = setup()
+	dg, client, state, db, config, err = setup()
+	defer teardown()
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -58,17 +64,32 @@ func GenerateRandomID(n int) string {
 	return string(b)
 }
 
-func setup() (dg *MockDiscordSession, client *openai.Client, state *skippy.State, db skippy.Database, err error) {
+func setup() (dg *MockDiscordSession, client *openai.Client, state *skippy.State, db skippy.Database, config *skippy.Config, err error) {
 	dg = &MockDiscordSession{
 		channelMessages:     make(map[string][]string),
 		channelTypingCalled: make(map[string]bool),
 	}
-	dg.State = &discordgo.State{
-		Ready: discordgo.Ready{
-			User: &discordgo.User{
-				ID: BOT_ID,
-			},
+	dg.State = discordgo.NewState()
+	dg.State.Ready = discordgo.Ready{
+		User: &discordgo.User{
+			ID: BOT_ID,
 		},
+	}
+
+	member := &discordgo.Member{
+		User: &discordgo.User{
+			ID:       USER_ID,
+			Username: USERNAME,
+		},
+	}
+	guild := discordgo.Guild{
+		ID:      GUILD_ID,
+		Members: []*discordgo.Member{member},
+	}
+
+	err = dg.State.GuildAdd(&guild)
+	if err != nil {
+		return
 	}
 
 	err = godotenv.Load("../.env")
@@ -96,17 +117,41 @@ func setup() (dg *MockDiscordSession, client *openai.Client, state *skippy.State
 	if err != nil {
 		return
 	}
+
 	mrog.AutoMigrate(&skippy.GameSession{})
 	db = &skippy.DB{mrog}
-	// Auto migrate the schema
+
+	config = &skippy.Config{
+		MinGameSessionDuration:     time.Nanosecond * 1,
+		PresenceUpdateDebouncDelay: time.Millisecond * 100,
+		ReminderDurations: []time.Duration{
+			time.Millisecond * 50,
+			time.Millisecond * 50,
+			time.Hour,
+		},
+		OpenAIModel: openai.GPT3Dot5Turbo,
+	}
+
 	return
 }
-
-func generateTestData(db skippy.Database, userID string, duration time.Duration, games []string) {
+func teardown() {
+	err := db.Close()
+	if err != nil {
+		fmt.Println("unable to close db connection: ", err)
+	}
+}
+func generateTestData(
+	db skippy.Database,
+	userID string,
+	duration time.Duration,
+	games []string,
+) {
 	now := time.Now()
 
 	for j := 0; j < len(games); j++ {
-		startTime := now.Add(time.Hour * time.Duration(10+j*2)) // 10 AM and 12 PM sessions
+		startTime := now.Add(
+			time.Hour * time.Duration(10+j*2),
+		) // 10 AM and 12 PM sessions
 		session := skippy.GameSession{
 			UserID:    userID,
 			Game:      games[j],

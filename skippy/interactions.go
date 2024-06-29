@@ -117,22 +117,23 @@ func onCommand(
 	client *openai.Client,
 	state *State,
 	db Database,
+	config *Config,
 ) {
 	log.Println(i.ApplicationCommandData().Name)
 	switch i.ApplicationCommandData().Name {
 	case RL_SESH:
-		if err := handleRLSesh(dg, i, client, state); err != nil {
+		if err := handleRLSesh(dg, i, client, state, config); err != nil {
 			handleSlashCommandError(dg, i, err)
 		}
 	case ALWAYS_RESPOND:
 		// should not error
 		handleAlwaysRespond(dg, i, client, state)
 	case SEND_MESSAGE:
-		if err := sendChannelMessage(dg, i, client, state); err != nil {
+		if err := sendChannelMessage(dg, i, client, state, config); err != nil {
 			handleSlashCommandError(dg, i, err)
 		}
 	case GAME_STATS:
-		if err := generateGameStats(dg, i, client, state, db); err != nil {
+		if err := generateGameStats(dg, i, client, state, db, config); err != nil {
 			handleSlashCommandError(dg, i, err)
 		}
 	default:
@@ -176,6 +177,7 @@ func generateGameStats(
 	client *openai.Client,
 	state *State,
 	db Database,
+	config *Config,
 ) error {
 	daysAgo := 7
 	optionValue, exists := findCommandOption(i.ApplicationCommandData().Options, DAYS)
@@ -189,7 +191,7 @@ func generateGameStats(
 		return err
 	}
 
-	aiGameSessions := sessions.ToGameSessionAI()
+	aiGameSessions := ToGameSessionAI(sessions)
 	content := ""
 	if aiGameSessions == nil {
 		content = "Please respond saying that there were no games found for this user"
@@ -230,6 +232,7 @@ func generateGameStats(
 		fmt.Sprintf(GENERATE_GAME_STAT_INSTRUCTIONS, i.Member.Mention()),
 		client,
 		state,
+		config,
 	)
 	return nil
 }
@@ -239,6 +242,7 @@ func sendChannelMessage(
 	i *discordgo.InteractionCreate,
 	client *openai.Client,
 	state *State,
+	config *Config,
 ) error {
 	optionValue, exists := findCommandOption(i.ApplicationCommandData().Options, CHANNEL)
 	if !exists {
@@ -284,6 +288,7 @@ func sendChannelMessage(
 		SEND_CHANNEL_MSG_INSTRUCTIONS,
 		client,
 		state,
+		config,
 	)
 
 	err := dg.InteractionRespond(i.Interaction,
@@ -332,6 +337,7 @@ func handleRLSesh(
 	i *discordgo.InteractionCreate,
 	client *openai.Client,
 	state *State,
+	config *Config,
 ) error {
 
 	optionValue, exists := findCommandOption(i.ApplicationCommandData().Options, START_OR_STOP)
@@ -353,7 +359,7 @@ func handleRLSesh(
 
 		message := "Started rocket league session"
 		filePath := os.Getenv("RL_DIR")
-		err = StartRocketLeagueSession(ctx, filePath, i.ChannelID, dg, state, client)
+		err = StartRocketLeagueSession(ctx, filePath, i.ChannelID, dg, state, client, config)
 		if err != nil {
 			message = "unable to start rocket leage session"
 		}

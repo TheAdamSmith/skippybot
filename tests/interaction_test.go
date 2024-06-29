@@ -22,7 +22,7 @@ func TestToggleAlwaysRespond(t *testing.T) {
 				Name: skippy.ALWAYS_RESPOND,
 			},
 		}}
-	skippy.OnCommand(dg, interaction, client, state, nil)
+	skippy.OnCommand(dg, interaction, client, state, db, config)
 
 	if !state.GetAlwaysRespond(channelID) {
 		t.Error("Always respond should be true")
@@ -36,7 +36,7 @@ func TestToggleAlwaysRespond(t *testing.T) {
 				Name: skippy.ALWAYS_RESPOND,
 			},
 		}}
-	skippy.OnCommand(dg, interaction, client, state, nil)
+	skippy.OnCommand(dg, interaction, client, state, db, config)
 
 	if state.GetAlwaysRespond(channelID) {
 		t.Error("Always respond should be false")
@@ -74,7 +74,7 @@ func TestSendChannelMessage(t *testing.T) {
 				},
 			}},
 	}
-	skippy.OnCommand(dg, interaction, client, state, nil)
+	skippy.OnCommand(dg, interaction, client, state, db, config)
 	// wait for message
 	timer := time.NewTimer(2 * time.Minute)
 loop:
@@ -102,7 +102,7 @@ func TestGenerateGameStats(t *testing.T) {
 	userID := "user1"
 	// these need to be capitalized and spaced out because bot will automatically do that
 	// needed for assertions below
-	games := []string{"Game 1", "Game 2"}
+	games := []string{"Valorant", "Rocket League"}
 	generateTestData(db, userID, time.Hour, games)
 
 	interaction := &discordgo.InteractionCreate{
@@ -117,7 +117,7 @@ func TestGenerateGameStats(t *testing.T) {
 				Name: skippy.GAME_STATS,
 			},
 		}}
-	skippy.OnCommand(dg, interaction, client, state, db)
+	skippy.OnCommand(dg, interaction, client, state, db, config)
 
 	// wait for message
 	timer := time.NewTimer(2 * time.Minute)

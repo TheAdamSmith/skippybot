@@ -60,9 +60,10 @@ func GetResponse(
 	threadID string,
 	dgChannID string,
 	messageReq openai.MessageRequest,
-	state *State,
-	client *openai.Client,
 	additionalInstructions string,
+	client *openai.Client,
+	state *State,
+	config *Config,
 ) (string, error) {
 
 	assistantID := state.GetAssistantID()
@@ -81,7 +82,7 @@ func GetResponse(
 	runReq := openai.RunRequest{
 		AssistantID:            assistantID,
 		AdditionalInstructions: additionalInstructions,
-		Model:                  openai.GPT4o,
+		Model:                  config.OpenAIModel,
 	}
 
 	if disableFunctions {
@@ -137,7 +138,7 @@ func GetResponse(
 			return message, nil
 
 		case openai.RunStatusRequiresAction:
-			run, err = handleRequiresAction(dg, run, dgChannID, threadID, state, client)
+			run, err = handleRequiresAction(dg, run, dgChannID, threadID, client, state, config)
 			if err != nil {
 				return "", err
 			}
@@ -157,8 +158,9 @@ func handleRequiresAction(
 	run openai.Run,
 	dgChannID string,
 	threadID string,
-	state *State,
 	client *openai.Client,
+	state *State,
+	config *Config,
 ) (openai.Run, error) {
 
 	funcArgs := GetFunctionArgs(run)
@@ -171,7 +173,7 @@ outerloop:
 		switch funcName := funcArg.FuncName; funcName {
 		case ToggleMorningMessage:
 			log.Println("toggle_morning_message()")
-			output, err := handleMorningMessage(dg, funcArg, dgChannID, client, state)
+			output, err := handleMorningMessage(dg, funcArg, dgChannID, client, state, config)
 			if err != nil {
 				log.Println("error handling morning message: ", err)
 			}
@@ -223,7 +225,7 @@ outerloop:
 			)
 		case SetReminder:
 			log.Println("set_reminder()")
-			output, err := setReminder(context.Background(), dg, funcArg, dgChannID, client, state)
+			output, err := setReminder(context.Background(), dg, funcArg, dgChannID, client, state, config)
 			if err != nil {
 				log.Println("error sending channel message: ", err)
 			}
@@ -302,6 +304,7 @@ func handleMorningMessage(
 	dgChannID string,
 	client *openai.Client,
 	state *State,
+	config *Config,
 ) (string, error) {
 
 	morningMsgFuncArgs := MorningMsgFuncArgs{}
@@ -317,6 +320,7 @@ func handleMorningMessage(
 		dgChannID,
 		client,
 		state,
+		config,
 	)
 
 	return output, nil
@@ -357,6 +361,7 @@ func setReminder(
 	channelID string,
 	client *openai.Client,
 	state *State,
+	config *Config,
 ) (string, error) {
 
 	var channelMsg ReminderFuncArgs
@@ -387,6 +392,7 @@ func setReminder(
 				channelMsg.UserID,
 				client,
 				state,
+				config,
 			)
 		},
 	)
@@ -400,29 +406,23 @@ func waitForReminderResponse(
 	userID string,
 	client *openai.Client,
 	state *State,
+	config *Config,
 ) {
-
-	maxRemind := 5
-	timeoutMin := 20 * time.Second
-	timer := time.NewTimer(timeoutMin)
-
-	reminds := 0
-	for {
-
+	timer := time.NewTimer(0)
+	for i := 0; i < len(config.ReminderDurations); i++ {
+		timer.Reset(config.ReminderDurations[i])
 		<-timer.C
+
 		thread, exists := state.GetThread(channelID)
 		if !exists {
 			return
 		}
+
 		// this value is reset on messageCreate
-		if !thread.awaitsResponse || reminds == maxRemind {
+		if !thread.awaitsResponse {
 			timer.Stop()
 			return
 		}
-
-		reminds++
-		timeoutMin = timeoutMin * 2
-		timer.Reset(timeoutMin)
 
 		log.Println("sending another reminder")
 
@@ -449,6 +449,7 @@ func waitForReminderResponse(
 			DEFAULT_INSTRUCTIONS,
 			client,
 			state,
+			config,
 		)
 	}
 
@@ -467,6 +468,7 @@ func toggleMorningMsg(
 	channelID string,
 	client *openai.Client,
 	state *State,
+	config *Config,
 ) string {
 
 	if !morningMsgFuncArgs.Enable {
@@ -528,7 +530,8 @@ func toggleMorningMsg(
 		duration,
 		channelID,
 		client,
-		state)
+		state,
+		config)
 
 	return "worked"
 }
@@ -542,6 +545,7 @@ func startMorningMessageLoop(
 	channelID string,
 	client *openai.Client,
 	state *State,
+	config *Config,
 ) {
 
 	ticker := time.NewTicker(duration)
@@ -602,6 +606,7 @@ func startMorningMessageLoop(
 				MORNING_MESSAGE_INSTRUCTIONS,
 				client,
 				state,
+				config,
 			)
 
 			if duration != 24*time.Hour {

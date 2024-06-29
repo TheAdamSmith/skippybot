@@ -43,6 +43,7 @@ func StartRocketLeagueSession(
 	dg DiscordSession,
 	state *State,
 	client *openai.Client,
+	config *Config,
 ) error {
 
 	fileCh := make(chan string)
@@ -74,6 +75,7 @@ func StartRocketLeagueSession(
 					COMMENTATE_INSTRUCTIONS,
 					client,
 					state,
+					config,
 				)
 			case <-ctx.Done():
 				log.Println("Received cancel command")
