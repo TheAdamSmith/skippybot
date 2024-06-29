@@ -68,6 +68,7 @@ func GetResponse(
 
 	assistantID := state.GetAssistantID()
 
+	// TODO: this should be a param
 	disableFunctions, ok := ctx.Value(DisableFunctions).(bool)
 	if !ok {
 		disableFunctions = false
@@ -426,6 +427,7 @@ func waitForReminderResponse(
 
 		log.Println("sending another reminder")
 
+		// TODO: they should not get mentioned
 		if userID == "" {
 			userID = "they"
 		}

@@ -35,6 +35,7 @@ type chatThread struct {
 	// TODO: this is can be used across multiple things ()
 	// should update this to use separate params
 	cancelFunc context.CancelFunc
+	mu         sync.Mutex
 	// messages []string
 	// reponses []string
 }
@@ -87,6 +88,18 @@ func (s *State) SetThread(threadID string, thread *chatThread) {
 	s.threadMap[threadID] = thread
 }
 
+// used for locking a specific chat Thread
+// does not lock state
+// CALLER MUST CALL UnLockThread
+func (s *State) LockThread(threadID string) {
+	s.threadMap[threadID].mu.Lock()
+}
+
+// unlocks a specific chat thread
+// does not unlock state
+func (s *State) UnLockThread(threadID string) {
+	s.threadMap[threadID].mu.Unlock()
+}
 func (s *State) AddCancelFunc(
 	threadID string,
 	cancelFunc context.CancelFunc,

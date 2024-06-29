@@ -7,6 +7,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -160,4 +161,13 @@ func generateTestData(
 		}
 		db.CreateGameSession(&session)
 	}
+}
+
+func checkForErrorResponse(messages []string) bool {
+	for _, message := range messages {
+		if strings.Contains(message, skippy.ERROR_RESPONSE) {
+			return true
+		}
+	}
+	return false
 }

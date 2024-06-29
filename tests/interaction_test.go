@@ -91,8 +91,15 @@ loop:
 			time.Sleep(1 * time.Second)
 		}
 	}
-	if !strings.Contains(dg.channelMessages[channelID_2][0], skippy.Mention(mentionID)) {
+	if !strings.Contains(
+		dg.channelMessages[channelID_2][0],
+		skippy.Mention(mentionID),
+	) {
 		t.Error("Expected message to contain mention")
+	}
+	if checkForErrorResponse(dg.channelMessages[channelID_1]) ||
+		checkForErrorResponse(dg.channelMessages[channelID_2]) {
+		t.Error("Expected message to not have error response")
 	}
 }
 
@@ -141,7 +148,13 @@ loop:
 		}
 	}
 
-	if !strings.Contains(dg.channelMessages[channelID][0], fmt.Sprint(len(games))+" hours") {
+	if !strings.Contains(
+		dg.channelMessages[channelID][0],
+		fmt.Sprint(len(games))+" hours",
+	) {
 		t.Error("Expected message to contain ", fmt.Sprint(len(games))+" hours")
+	}
+	if checkForErrorResponse(dg.channelMessages[channelID]) {
+		t.Error("Expected message to not have error response")
 	}
 }

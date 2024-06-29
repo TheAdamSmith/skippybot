@@ -13,28 +13,31 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-const COMMENTATE_INSTRUCTIONS = `
-    Messages will be sent in this thread that will contain the json results of a rocket league game.
-    Announce the overall score and commentate on the performance of the home team. Come up with creative insults on their performance, but praise high performers
-  `
-
-const DEFAULT_INSTRUCTIONS = `Try to be as helpful as possible while keeping the iconic skippy saracasm in your response.
-  Use responses of varying lengths.
-`
-const MORNING_MESSAGE_INSTRUCTIONS = `
-You are making creating morning wake up message for the users of a discord server. Make sure to mention @here in your message. 
-Be creative in the message you create in wishing everyone good morning. If there is weather data included in the message please give a brief overview of the weather for each location.
-if there is stock price information included in the message include that information in the message.
+const (
+	COMMENTATE_INSTRUCTIONS = `
+	Messages will be sent in this thread that will contain the json results of a rocket league game.
+	Announce the overall score and commentate on the performance of the home team. Come up with creative insults on their performance, but praise high performers
 	`
 
-const SEND_CHANNEL_MSG_INSTRUCTIONS = `You are generating a message to send in a discord channel. Generate a message based on the prompt.
+	DEFAULT_INSTRUCTIONS = `Try to be as helpful as possible while keeping the iconic skippy saracasm in your response.
+	Use responses of varying lengths.
+	`
+	MORNING_MESSAGE_INSTRUCTIONS = `
+	You are making creating morning wake up message for the users of a discord server. Make sure to mention @here in your message. 
+	Be creative in the message you create in wishing everyone good morning. If there is weather data included in the message please give a brief overview of the weather for each location.
+	if there is stock price information included in the message include that information in the message.
+	`
+
+	SEND_CHANNEL_MSG_INSTRUCTIONS = `You are generating a message to send in a discord channel. Generate a message based on the prompt.
 	If a user id is provided use it in your message.
-`
-const GENERATE_GAME_STAT_INSTRUCTIONS = `You are summarizing a users game sessions. 
+	`
+	GENERATE_GAME_STAT_INSTRUCTIONS = `You are summarizing a users game sessions. 
 	The message will be a a json formatted list of game sessions. 
 	Please summarise the results of the sessions including total hours played and the most played game.
 	This is the user mention (%s) of the user you are summarizing. Please include it in your message.
 	`
+	ERROR_RESPONSE = "Oh no! Something went wrong."
+)
 
 func RunDiscord(
 	token string,
@@ -67,11 +70,13 @@ func RunDiscord(
 		messageCreate(dg, m, client, state, config)
 	})
 
-	session.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-		if i.Type == discordgo.InteractionApplicationCommand {
-			onCommand(dg, i, client, state, db, config)
-		}
-	})
+	session.AddHandler(
+		func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+			if i.Type == discordgo.InteractionApplicationCommand {
+				onCommand(dg, i, client, state, db, config)
+			}
+		},
+	)
 
 	// discord presence update repeates calls rapidly
 	// might be from multiple servers so debounce the calls
@@ -88,18 +93,33 @@ func RunDiscord(
 
 	log.Println("Bot is now running. Press CTRL+C to exit.")
 	sc := make(chan os.Signal, 1)
-	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(
+		sc,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
 	<-sc
 }
 
-func sendChunkedChannelMessage(dg DiscordSession, channelID string, message string) error {
+func sendChunkedChannelMessage(
+	dg DiscordSession,
+	channelID string,
+	message string,
+) error {
+	log.Printf("Sending message on %s: %s\n", channelID, message)
 	// Discord has a limit of 2000 characters for a single message
 	// If the message is longer than that, we need to split it into chunks
 	for len(message) > 0 {
 		if len(message) > 2000 {
 			_, err := dg.ChannelMessageSend(channelID, message[:2000])
 			if err != nil {
-				log.Printf("Could not send discord message on channel %s: %s\n", channelID, err)
+				log.Printf(
+					"Could not send discord message on channel %s: %s\n",
+					channelID,
+					err,
+				)
 				return err
 			}
 			message = message[2000:]
@@ -198,6 +218,9 @@ func getAndSendResponse(
 	log.Println("Attempting to get response...")
 
 	thread := state.GetOrCreateThread(dgChannID, client)
+	// lock the thread because we can't queue additional messages during a run
+	state.LockThread(dgChannID)
+	defer state.UnLockThread(dgChannID)
 
 	response, err := GetResponse(
 		ctx,
@@ -212,7 +235,7 @@ func getAndSendResponse(
 	)
 	if err != nil {
 		log.Println("Unable to get response: ", err)
-		response = "Oh no! Something went wrong."
+		response = ERROR_RESPONSE
 	}
 
 	err = sendChunkedChannelMessage(dg, dgChannID, response)
@@ -232,7 +255,13 @@ func onPresenceUpdateDebounce(
 	})
 }
 
-func onPresenceUpdate(dg DiscordSession, p *discordgo.PresenceUpdate, s *State, db Database, config *Config) {
+func onPresenceUpdate(
+	dg DiscordSession,
+	p *discordgo.PresenceUpdate,
+	s *State,
+	db Database,
+	config *Config,
+) {
 
 	game, isPlayingGame := getCurrentGame(p)
 	isPlayingGame = isPlayingGame && game != ""
@@ -245,7 +274,8 @@ func onPresenceUpdate(dg DiscordSession, p *discordgo.PresenceUpdate, s *State, 
 		return
 	}
 
-	startedPlaying := isPlayingGame && (!exists || exists && !userPresence.IsPlayingGame)
+	startedPlaying := isPlayingGame &&
+		(!exists || exists && !userPresence.IsPlayingGame)
 	stoppedPlaying := exists && userPresence.IsPlayingGame && !isPlayingGame
 
 	if startedPlaying {

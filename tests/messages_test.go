@@ -61,10 +61,79 @@ func TestMessageCreateWithMention(t *testing.T) {
 	if !dg.channelTypingCalled[channelID] {
 		t.Error("Expected ChannelTyping to be called")
 	}
+	if checkForErrorResponse(dg.channelMessages[channelID]) {
+		t.Error("Expected message to not have error response")
+	}
 }
 
-// TODO: need to test the reminder backoff
-// but need to be able to set up testing config first
+func TestSendMultipleMessages(t *testing.T) {
+	t.Parallel()
+	content := "test"
+	channelID_1 := GenerateRandomID(10)
+	channelID_2 := GenerateRandomID(10)
+	go func() {
+		for i := 0; i < 3; i++ {
+			msg_1 := &discordgo.MessageCreate{
+				Message: &discordgo.Message{
+					ID:        "1",
+					ChannelID: channelID_1,
+					Content:   content,
+					Author: &discordgo.User{
+						ID: "USER",
+					},
+					Mentions: []*discordgo.User{
+						&discordgo.User{
+							ID: BOT_ID,
+						},
+					},
+				},
+			}
+
+			msg_2 := &discordgo.MessageCreate{
+				Message: &discordgo.Message{
+					ID:        "2",
+					ChannelID: channelID_2,
+					Content:   content,
+					Author: &discordgo.User{
+						ID: "USER",
+					},
+					Mentions: []*discordgo.User{
+						&discordgo.User{
+							ID: BOT_ID,
+						},
+					},
+				},
+			}
+			skippy.MessageCreate(dg, msg_1, client, state, config)
+			skippy.MessageCreate(dg, msg_2, client, state, config)
+
+		}
+	}()
+	timer := time.NewTimer(1 * time.Minute)
+loop:
+	for {
+		select {
+		case <-timer.C:
+			t.Error("Expected ChannelMessageSend to be called 3 times")
+			break loop
+		default:
+			if len(dg.channelMessages[channelID_1]) == 3 && len(dg.channelMessages[channelID_2]) != 3 {
+				timer.Stop()
+				break loop
+			}
+			time.Sleep(1 * time.Second)
+		}
+	}
+
+	if !dg.channelTypingCalled[channelID_1] || !dg.channelTypingCalled[channelID_2] {
+		t.Error("Expected ChannelTyping to be called")
+	}
+
+	if checkForErrorResponse(dg.channelMessages[channelID_1]) || checkForErrorResponse(dg.channelMessages[channelID_2]) {
+		t.Error("Expected message to not have error response")
+	}
+}
+
 func TestCreateReminder(t *testing.T) {
 	t.Parallel()
 	content := "Can you remind me 1 second to take out the trash"
@@ -88,9 +157,20 @@ func TestCreateReminder(t *testing.T) {
 	skippy.MessageCreate(dg, msg, client, state, config)
 
 	// wait for reminder
-	time.Sleep(2 * time.Second)
-	if len(dg.channelMessages[channelID]) != 4 {
-		t.Error("Expected ChannelMessageSend to be called twice")
+	timer := time.NewTimer(1 * time.Minute)
+loop:
+	for {
+		select {
+		case <-timer.C:
+			t.Error("Expected ChannelMessageSend to be called 4 times")
+			break loop
+		default:
+			if len(dg.channelMessages[channelID]) == 4 {
+				timer.Stop()
+				break loop
+			}
+			time.Sleep(1 * time.Second)
+		}
 	}
 
 	if !dg.channelTypingCalled[channelID] {
@@ -120,6 +200,10 @@ func TestCreateReminder(t *testing.T) {
 	if state.GetAwaitsResponse(channelID) {
 		t.Error("Expected thread to not be awaiting response")
 	}
+
+	if checkForErrorResponse(dg.channelMessages[channelID]) {
+		t.Error("Expected message to not have error response")
+	}
 }
 
 func TestToggleMorningMessage(t *testing.T) {
@@ -128,10 +212,6 @@ func TestToggleMorningMessage(t *testing.T) {
 	// set the morning message
 	content :=
 		"can you toggle the morning message for 1 minute from now"
-	// fmt.Sprintf(
-	// 	time.Now().
-	// 		Add(1*time.Minute).
-	// 		Format("15:04"))
 
 	channelID := GenerateRandomID(10)
 	msg := &discordgo.MessageCreate{
@@ -202,5 +282,8 @@ loop:
 
 	if len(dg.channelMessages[channelID]) != 3 {
 		t.Error("Expected morning message to be canceled")
+	}
+	if checkForErrorResponse(dg.channelMessages[channelID]) {
+		t.Error("Expected message to not have error response")
 	}
 }
