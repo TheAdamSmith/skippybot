@@ -37,7 +37,8 @@ const (
 	This is the user mention (%s) of the user you are summarizing. Please include it in your message.
 	`
 
-	ERROR_RESPONSE = "Oh no! Something went wrong."
+	ERROR_RESPONSE   = "Oh no! Something went wrong."
+	EVERYONE_MENTION = "@everyone"
 )
 
 func RunDiscord(
@@ -83,10 +84,7 @@ func RunDiscord(
 	// might be from multiple servers so debounce the calls
 	debouncer := NewDebouncer(config.PresenceUpdateDebouncDelay)
 	session.AddHandler(func(s *discordgo.Session, p *discordgo.PresenceUpdate) {
-		debouncer.Debounce(p.User.ID, func() {
-			onPresenceUpdate(dg, p, state, db, config)
-		},
-		)
+		onPresenceUpdateDebounce(dg, p, state, db, debouncer, config)
 	})
 
 	// deleteSlashCommands(dg)

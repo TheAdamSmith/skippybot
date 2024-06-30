@@ -30,6 +30,27 @@ func TestToggleAlwaysRespond(t *testing.T) {
 		t.Error("Always respond should be true")
 	}
 
+	content := "test"
+	msg := &discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ID:        "1",
+			ChannelID: channelID,
+			Content:   content,
+			Author: &discordgo.User{
+				ID: "USER",
+			},
+		},
+	}
+
+	skippy.MessageCreate(dg, msg, client, state, config)
+
+	if len(dg.channelMessages[channelID]) != 1 {
+		t.Error("Expected ChannelMessageSend to be called")
+	}
+	if !dg.channelTypingCalled[channelID] {
+		t.Error("Expected ChannelTyping to be called")
+	}
+
 	interaction = &discordgo.InteractionCreate{
 		Interaction: &discordgo.Interaction{
 			Type:      discordgo.InteractionApplicationCommand,
@@ -98,7 +119,7 @@ loop:
 	}
 	if !strings.Contains(
 		dg.channelMessages[channelID_2][0],
-		skippy.Mention(mentionID),
+		skippy.UserMention(mentionID),
 	) {
 		t.Error("Expected message to contain mention")
 	}

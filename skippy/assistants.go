@@ -425,7 +425,7 @@ func waitForReminderResponse(
 		// TODO: maybe add this to additional_instruction
 		message := fmt.Sprintf(
 			"It looks %s haven't responsed to this reminder can you generate a response nagging them about it. This is not a tool request.",
-			Mention(userID),
+			UserMention(userID),
 		)
 
 		messageReq := openai.MessageRequest{
@@ -446,7 +446,7 @@ func waitForReminderResponse(
 	}
 }
 
-func Mention(userID string) string {
+func UserMention(userID string) string {
 	if strings.HasPrefix(userID, "<@") && strings.HasSuffix(userID, ">") {
 		return userID
 	}

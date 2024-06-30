@@ -117,7 +117,7 @@ loop:
 			t.Error("Expected ChannelMessageSend to be called 3 times")
 			break loop
 		default:
-			if len(dg.channelMessages[channelID_1]) == 3 && len(dg.channelMessages[channelID_2]) != 3 {
+			if len(dg.channelMessages[channelID_1]) == 3 && len(dg.channelMessages[channelID_2]) == 3 {
 				timer.Stop()
 				break loop
 			}
@@ -165,6 +165,8 @@ loop:
 			t.Error("Expected ChannelMessageSend to be called 4 times")
 			break loop
 		default:
+			// one for the response to the reminder, one for the reminder,
+			// two for the follow up reminders
 			if len(dg.channelMessages[channelID]) == 4 {
 				timer.Stop()
 				break loop
