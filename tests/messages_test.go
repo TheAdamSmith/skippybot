@@ -25,7 +25,7 @@ func TestMessageCreateNoMention(t *testing.T) {
 		},
 	}
 
-	skippy.MessageCreate(dg, msg, client, state, config)
+	skippy.MessageCreate(dg, msg, client, state, scheduler, config)
 	if len(dg.channelMessages[channelID]) > 0 {
 		t.Error("Expected ChannelMessageSend to not be called")
 	}
@@ -54,7 +54,7 @@ func TestMessageCreateWithMention(t *testing.T) {
 		},
 	}
 
-	skippy.MessageCreate(dg, msg, client, state, config)
+	skippy.MessageCreate(dg, msg, client, state, scheduler, config)
 	if len(dg.channelMessages[channelID]) != 1 {
 		t.Error("Expected ChannelMessageSend to be called")
 	}
@@ -104,8 +104,8 @@ func TestSendMultipleMessages(t *testing.T) {
 					},
 				},
 			}
-			skippy.MessageCreate(dg, msg_1, client, state, config)
-			skippy.MessageCreate(dg, msg_2, client, state, config)
+			skippy.MessageCreate(dg, msg_1, client, state, scheduler, config)
+			skippy.MessageCreate(dg, msg_2, client, state, scheduler, config)
 
 		}
 	}()
@@ -154,7 +154,7 @@ func TestCreateReminder(t *testing.T) {
 		},
 	}
 
-	skippy.MessageCreate(dg, msg, client, state, config)
+	skippy.MessageCreate(dg, msg, client, state, scheduler, config)
 
 	// wait for reminder
 	timer := time.NewTimer(1 * time.Minute)
@@ -194,7 +194,7 @@ loop:
 		},
 	}
 
-	skippy.MessageCreate(dg, msg, client, state, config)
+	skippy.MessageCreate(dg, msg, client, state, scheduler, config)
 	if len(dg.channelMessages[channelID]) != 5 {
 		t.Error("Expected ChannelMessageSend to be called again")
 	}
@@ -231,7 +231,7 @@ func TestToggleMorningMessage(t *testing.T) {
 		},
 	}
 
-	skippy.MessageCreate(dg, msg, client, state, config)
+	skippy.MessageCreate(dg, msg, client, state, scheduler, config)
 
 	// wait for reminder
 	timer := time.NewTimer(2 * time.Minute)
@@ -279,7 +279,7 @@ loop:
 		},
 	}
 
-	skippy.MessageCreate(dg, msg, client, state, config)
+	skippy.MessageCreate(dg, msg, client, state, scheduler, config)
 
 	if len(dg.channelMessages[channelID]) != 3 {
 		t.Error("Expected morning message to be canceled")

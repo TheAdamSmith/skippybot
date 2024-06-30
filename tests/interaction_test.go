@@ -42,7 +42,7 @@ func TestToggleAlwaysRespond(t *testing.T) {
 		},
 	}
 
-	skippy.MessageCreate(dg, msg, client, state, config)
+	skippy.MessageCreate(dg, msg, client, state, scheduler, config)
 
 	if len(dg.channelMessages[channelID]) != 1 {
 		t.Error("Expected ChannelMessageSend to be called")

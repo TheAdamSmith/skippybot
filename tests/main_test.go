@@ -35,6 +35,7 @@ var (
 	state         *skippy.State
 	dg            *MockDiscordSession
 	db            skippy.Database
+	scheduler     *skippy.Scheduler
 	config        *skippy.Config
 	enableLogging bool
 )
@@ -49,7 +50,7 @@ func TestMain(m *testing.M) {
 		log.SetOutput(io.Discard)
 	}
 	var err error
-	dg, client, state, db, config, err = setup()
+	dg, client, state, db, scheduler, config, err = setup()
 	defer teardown()
 	if err != nil {
 		fmt.Println(err)
@@ -71,6 +72,7 @@ func setup() (
 	client *openai.Client,
 	state *skippy.State,
 	db skippy.Database,
+	scheduler *skippy.Scheduler,
 	config *skippy.Config, err error,
 ) {
 	dg = &MockDiscordSession{
@@ -130,7 +132,13 @@ func setup() (
 	}
 
 	mrog.AutoMigrate(&skippy.GameSession{})
-	db = &skippy.DB{mrog}
+	db = &skippy.DB{DB: mrog}
+
+	scheduler, err = skippy.NewScheduler()
+	if err != nil {
+		return
+	}
+	scheduler.Start()
 
 	config = &skippy.Config{
 		MinGameSessionDuration:     time.Nanosecond * 1,
