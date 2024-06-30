@@ -168,8 +168,8 @@ func onCommand(
 			log.Printf("Error responding to slash command: %s\n", err)
 		}
 	}
-
 }
+
 func handleSlashCommandError(
 	dg DiscordSession,
 	i *discordgo.InteractionCreate,
@@ -384,7 +384,6 @@ func handleRLSesh(
 	state *State,
 	config *Config,
 ) error {
-
 	optionValue, exists := findCommandOption(
 		i.ApplicationCommandData().Options,
 		START_OR_STOP,

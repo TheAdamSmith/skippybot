@@ -7,11 +7,10 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"skippybot/skippy"
 	"strings"
 	"testing"
 	"time"
-
-	"skippybot/skippy"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
@@ -31,12 +30,14 @@ const (
 
 // these variables are shared between tests which is intentional
 // they simulate a live discord environment
-var client *openai.Client
-var state *skippy.State
-var dg *MockDiscordSession
-var db skippy.Database
-var config *skippy.Config
-var enableLogging bool
+var (
+	client        *openai.Client
+	state         *skippy.State
+	dg            *MockDiscordSession
+	db            skippy.Database
+	config        *skippy.Config
+	enableLogging bool
+)
 
 func init() {
 	flag.BoolVar(&enableLogging, "log", false, "enable logging")
@@ -65,7 +66,13 @@ func GenerateRandomID(n int) string {
 	return string(b)
 }
 
-func setup() (dg *MockDiscordSession, client *openai.Client, state *skippy.State, db skippy.Database, config *skippy.Config, err error) {
+func setup() (
+	dg *MockDiscordSession,
+	client *openai.Client,
+	state *skippy.State,
+	db skippy.Database,
+	config *skippy.Config, err error,
+) {
 	dg = &MockDiscordSession{
 		channelMessages:     make(map[string][]string),
 		channelTypingCalled: make(map[string]bool),
@@ -135,12 +142,14 @@ func setup() (dg *MockDiscordSession, client *openai.Client, state *skippy.State
 
 	return
 }
+
 func teardown() {
 	err := db.Close()
 	if err != nil {
 		fmt.Println("unable to close db connection: ", err)
 	}
 }
+
 func generateTestData(
 	db skippy.Database,
 	userID string,

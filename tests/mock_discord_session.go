@@ -49,6 +49,7 @@ func (m *MockDiscordSession) InteractionRespond(
 	log.Println("InteractionRespond")
 	return nil
 }
+
 func (m *MockDiscordSession) GetState() *discordgo.State {
 	return m.State
 }

@@ -1,9 +1,10 @@
 package tests
 
 import (
-	"skippybot/skippy"
 	"testing"
 	"time"
+
+	"skippybot/skippy"
 
 	"github.com/bwmarrin/discordgo"
 )

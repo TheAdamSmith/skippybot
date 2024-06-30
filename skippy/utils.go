@@ -38,7 +38,6 @@ func replaceChannelIDs(content string, channels []*discordgo.Channel) string {
 }
 
 func isRoleMentioned(dg DiscordSession, m *discordgo.MessageCreate) (string, bool) {
-
 	member, err := dg.GuildMember(m.GuildID, dg.GetState().User.ID)
 	if err != nil {
 		return "", false

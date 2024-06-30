@@ -3,7 +3,9 @@
 
 package skippy
 
-var MessageCreate = messageCreate
-var OnCommand = onCommand
-var OnPresenceUpdate = onPresenceUpdate
-var OnPresenceUpdateDebounce = onPresenceUpdateDebounce
+var (
+	MessageCreate            = messageCreate
+	OnCommand                = onCommand
+	OnPresenceUpdate         = onPresenceUpdate
+	OnPresenceUpdateDebounce = onPresenceUpdateDebounce
+)

@@ -47,7 +47,7 @@ func TestMessageCreateWithMention(t *testing.T) {
 				ID: "USER",
 			},
 			Mentions: []*discordgo.User{
-				&discordgo.User{
+				{
 					ID: BOT_ID,
 				},
 			},
@@ -82,7 +82,7 @@ func TestSendMultipleMessages(t *testing.T) {
 						ID: "USER",
 					},
 					Mentions: []*discordgo.User{
-						&discordgo.User{
+						{
 							ID: BOT_ID,
 						},
 					},
@@ -98,7 +98,7 @@ func TestSendMultipleMessages(t *testing.T) {
 						ID: "USER",
 					},
 					Mentions: []*discordgo.User{
-						&discordgo.User{
+						{
 							ID: BOT_ID,
 						},
 					},
@@ -147,7 +147,7 @@ func TestCreateReminder(t *testing.T) {
 				ID: "USER",
 			},
 			Mentions: []*discordgo.User{
-				&discordgo.User{
+				{
 					ID: BOT_ID,
 				},
 			},
@@ -210,8 +210,7 @@ func TestToggleMorningMessage(t *testing.T) {
 	t.Parallel()
 	// the time for this needs to be longer than it take to make the call to
 	// set the morning message
-	content :=
-		"can you toggle the morning message for 1 minute from now"
+	content := "can you toggle the morning message for 1 minute from now"
 
 	channelID := GenerateRandomID(10)
 	msg := &discordgo.MessageCreate{
@@ -223,7 +222,7 @@ func TestToggleMorningMessage(t *testing.T) {
 				ID: "USER",
 			},
 			Mentions: []*discordgo.User{
-				&discordgo.User{
+				{
 					ID: BOT_ID,
 				},
 			},
@@ -271,7 +270,7 @@ loop:
 				ID: "USER",
 			},
 			Mentions: []*discordgo.User{
-				&discordgo.User{
+				{
 					ID: BOT_ID,
 				},
 			},

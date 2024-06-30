@@ -65,7 +65,6 @@ func GetResponse(
 	state *State,
 	config *Config,
 ) (string, error) {
-
 	assistantID := state.GetAssistantID()
 
 	// TODO: this should be a param
@@ -163,7 +162,6 @@ func handleRequiresAction(
 	state *State,
 	config *Config,
 ) (openai.Run, error) {
-
 	funcArgs := GetFunctionArgs(run)
 
 	var toolOutputs []openai.ToolOutput
@@ -245,7 +243,6 @@ outerloop:
 		}
 	}
 	return submitToolOutputs(client, toolOutputs, threadID, run.ID)
-
 }
 
 func handleGetWeather(
@@ -253,9 +250,7 @@ func handleGetWeather(
 	funcArg FuncArgs,
 	client *openai.Client,
 	state *State,
-
 ) (string, error) {
-
 	weatherFuncArgs := WeatherFuncArgs{}
 	err := json.Unmarshal([]byte(funcArg.JsonValue), &weatherFuncArgs)
 	if err != nil {
@@ -280,7 +275,6 @@ func handleGetStockPrice(
 	client *openai.Client,
 	state *State,
 ) (string, error) {
-
 	stockFuncArgs := StockFuncArgs{}
 	err := json.Unmarshal([]byte(funcArg.JsonValue), &stockFuncArgs)
 	if err != nil {
@@ -307,7 +301,6 @@ func handleMorningMessage(
 	state *State,
 	config *Config,
 ) (string, error) {
-
 	morningMsgFuncArgs := MorningMsgFuncArgs{}
 	err := json.Unmarshal([]byte(funcArg.JsonValue), &morningMsgFuncArgs)
 	if err != nil {
@@ -334,9 +327,7 @@ func getAndSendImage(
 	channelID string,
 	client *openai.Client,
 	state *State,
-
 ) (string, error) {
-
 	generateImageFuncArgs := GenerateImageFuncArgs{}
 	err := json.Unmarshal([]byte(funcArg.JsonValue), &generateImageFuncArgs)
 	if err != nil {
@@ -364,7 +355,6 @@ func setReminder(
 	state *State,
 	config *Config,
 ) (string, error) {
-
 	var channelMsg ReminderFuncArgs
 
 	err := json.Unmarshal([]byte(funcArg.JsonValue), &channelMsg)
@@ -454,7 +444,6 @@ func waitForReminderResponse(
 			config,
 		)
 	}
-
 }
 
 func Mention(userID string) string {
@@ -472,7 +461,6 @@ func toggleMorningMsg(
 	state *State,
 	config *Config,
 ) string {
-
 	if !morningMsgFuncArgs.Enable {
 		thread, exists := state.GetThread(channelID)
 		if !exists {
@@ -549,7 +537,6 @@ func startMorningMessageLoop(
 	state *State,
 	config *Config,
 ) {
-
 	ticker := time.NewTicker(duration)
 
 	for {
@@ -623,8 +610,8 @@ func submitToolOutputs(
 	client *openai.Client,
 	toolOutputs []openai.ToolOutput,
 	threadID string,
-	runID string) (run openai.Run, err error) {
-
+	runID string,
+) (run openai.Run, err error) {
 	req := openai.SubmitToolOutputsRequest{
 		ToolOutputs: toolOutputs,
 	}
@@ -649,6 +636,7 @@ func makeNoOpToolOutputs(funcArgs []FuncArgs, toolID string, output string) []op
 	}
 	return toolOutputs
 }
+
 func GetFunctionArgs(r openai.Run) []FuncArgs {
 	toolCalls := r.RequiredAction.SubmitToolOutputs.ToolCalls
 	result := make([]FuncArgs, len(toolCalls))
@@ -665,7 +653,6 @@ func GetFunctionArgs(r openai.Run) []FuncArgs {
 func getFirstMessage(messageList openai.MessagesList) (string, error) {
 	if len(messageList.Messages) <= 0 || messageList.FirstID == nil {
 		return "", errors.New("recieved zero length message list")
-
 	}
 	firstId := messageList.FirstID
 	for _, message := range messageList.Messages {

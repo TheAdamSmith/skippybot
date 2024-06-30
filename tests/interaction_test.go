@@ -2,10 +2,11 @@ package tests
 
 import (
 	"fmt"
-	"skippybot/skippy"
 	"strings"
 	"testing"
 	"time"
+
+	"skippybot/skippy"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -21,7 +22,8 @@ func TestToggleAlwaysRespond(t *testing.T) {
 			Data: discordgo.ApplicationCommandInteractionData{
 				Name: skippy.ALWAYS_RESPOND,
 			},
-		}}
+		},
+	}
 	skippy.OnCommand(dg, interaction, client, state, db, config)
 
 	if !state.GetAlwaysRespond(channelID) {
@@ -35,7 +37,8 @@ func TestToggleAlwaysRespond(t *testing.T) {
 			Data: discordgo.ApplicationCommandInteractionData{
 				Name: skippy.ALWAYS_RESPOND,
 			},
-		}}
+		},
+	}
 	skippy.OnCommand(dg, interaction, client, state, db, config)
 
 	if state.GetAlwaysRespond(channelID) {
@@ -73,7 +76,8 @@ func TestSendChannelMessage(t *testing.T) {
 						Value: mentionID,
 					},
 				},
-			}},
+			},
+		},
 	}
 	skippy.OnCommand(dg, interaction, client, state, db, config)
 	// wait for message
@@ -120,11 +124,13 @@ func TestGenerateGameStats(t *testing.T) {
 			Member: &discordgo.Member{
 				User: &discordgo.User{
 					ID: userID,
-				}},
+				},
+			},
 			Data: discordgo.ApplicationCommandInteractionData{
 				Name: skippy.GAME_STATS,
 			},
-		}}
+		},
+	}
 	skippy.OnCommand(dg, interaction, client, state, db, config)
 
 	// wait for message

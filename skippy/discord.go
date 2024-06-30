@@ -263,7 +263,6 @@ func onPresenceUpdate(
 	db Database,
 	config *Config,
 ) {
-
 	game, isPlayingGame := getCurrentGame(p)
 	isPlayingGame = isPlayingGame && game != ""
 

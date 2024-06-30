@@ -45,7 +45,6 @@ func StartRocketLeagueSession(
 	client *openai.Client,
 	config *Config,
 ) error {
-
 	fileCh := make(chan string)
 
 	if filePath != "" {
@@ -85,8 +84,8 @@ func StartRocketLeagueSession(
 	}()
 
 	return nil
-
 }
+
 func WatchFolder(filePath string, ch chan<- string, interval time.Duration) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {

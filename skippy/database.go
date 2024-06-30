@@ -78,10 +78,12 @@ func (db *DB) GetGameSession(id uint) (*GameSession, error) {
 	err := db.DB.First(&gs, id).Error
 	return &gs, err
 }
+
 func (db *DB) DeleteGameSession(id uint) error {
 	err := db.DB.Delete(&GameSession{}, id).Error
 	return err
 }
+
 func (db *DB) GetGameSessionsByUser(userID string) ([]GameSession, error) {
 	var gs []GameSession
 	err := db.DB.Where(&GameSession{UserID: userID}).Find(&gs).Error

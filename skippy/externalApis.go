@@ -28,7 +28,6 @@ type ApiResponse struct {
 }
 
 func getStockPrice(symbol string, apiKey string) (string, error) {
-
 	baseURL := "https://www.alphavantage.co/query"
 
 	u, err := url.Parse(baseURL)

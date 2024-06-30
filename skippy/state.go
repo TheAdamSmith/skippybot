@@ -100,6 +100,7 @@ func (s *State) LockThread(threadID string) {
 func (s *State) UnLockThread(threadID string) {
 	s.threadMap[threadID].mu.Unlock()
 }
+
 func (s *State) AddCancelFunc(
 	threadID string,
 	cancelFunc context.CancelFunc,
