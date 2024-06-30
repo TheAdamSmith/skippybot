@@ -170,7 +170,6 @@ func (s *State) ResetOpenAIThread(threadID string, client *openai.Client) error 
 }
 
 func (s *State) ToggleAlwaysRespond(threadID string, client *openai.Client) bool {
-	log.Println("Toggling always respond")
 	s.mu.Lock()
 	_, threadExists := s.threadMap[threadID]
 	if !threadExists {

@@ -294,14 +294,12 @@ func sendChannelMessage(
 		MENTION,
 	)
 	if exists {
-		// Can also call Guild() on session
-		// that fetches from discord api but the state guild seems suffecient
 		guild, err := dg.GetState().Guild(i.GuildID)
 		if err != nil {
 			log.Println("Could not get guild", err)
 			return err
 		}
-		mentionString, err = getMentionableMention(optionValue, guild)
+		mentionString, err = getOptionMention(optionValue, guild)
 		if err != nil {
 			log.Println("Could not get mention", err)
 		}
@@ -471,7 +469,8 @@ func findCommandOption(
 	return nil, false
 }
 
-func getMentionableMention(
+// Gets the correct mention from an option value
+func getOptionMention(
 	optionValue *discordgo.ApplicationCommandInteractionDataOption,
 	guild *discordgo.Guild,
 ) (string, error) {
@@ -479,17 +478,19 @@ func getMentionableMention(
 	if !ok {
 		return "", fmt.Errorf("error casting optionValue to string")
 	}
+	// check roles first since the role mention format is different
 	for _, role := range guild.Roles {
 		if role.ID == mentionID {
-			// TODO: move to constants
-			if role.Name == "@everyone" {
+			// @here and @everyone have to be handled as plain strings
+			if role.Name == EVERYONE_MENTION {
 				return role.Name, nil
 			} else {
 				return role.Mention(), nil
 			}
 		}
 	}
-	return Mention(mentionID), nil
+	// if it is not a role id then it is a user
+	return UserMention(mentionID), nil
 }
 
 //lint:ignore U1000 saving for later

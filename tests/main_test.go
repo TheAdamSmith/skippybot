@@ -84,6 +84,8 @@ func setup() (
 		},
 	}
 
+	// need to intialize a member and guild
+	// so the cache is populated and works for tests
 	member := &discordgo.Member{
 		User: &discordgo.User{
 			ID:       USER_ID,
@@ -113,7 +115,8 @@ func setup() (
 
 	assistantID := os.Getenv("ASSISTANT_ID")
 	if assistantID == "" {
-		fmt.Errorf("could not read Assistant ID")
+		err = fmt.Errorf("could not read Assistant ID")
+		return
 	}
 
 	clientConfig := openai.DefaultConfig(openAIKey)
