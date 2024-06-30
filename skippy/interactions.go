@@ -245,7 +245,7 @@ func generateGameStats(
 		Content: content,
 	}
 	ctx := context.WithValue(context.Background(), DisableFunctions, true)
-	go getAndSendResponse(
+	go getAndSendResponseWithoutTools(
 		ctx,
 		dg,
 		i.ChannelID,
@@ -253,7 +253,6 @@ func generateGameStats(
 		fmt.Sprintf(GENERATE_GAME_STAT_INSTRUCTIONS, i.Member.Mention()),
 		client,
 		state,
-		config,
 	)
 	return nil
 }
@@ -323,7 +322,7 @@ func sendChannelMessage(
 	}
 
 	ctx := context.WithValue(context.Background(), DisableFunctions, true)
-	go getAndSendResponse(
+	go getAndSendResponseWithoutTools(
 		ctx,
 		dg,
 		channelID,
@@ -331,7 +330,6 @@ func sendChannelMessage(
 		instructions,
 		client,
 		state,
-		config,
 	)
 
 	err := dg.InteractionRespond(i.Interaction,

@@ -19,6 +19,11 @@ type State struct {
 	discordToken    string
 	stockApiKey     string
 	weatherApiKey   string
+	// TODO
+	// this is a temporary fix that removes some dependency on
+	// the Config struct. The config struct should be moved into here
+	// and made a map for config per server
+	openAIModel string
 }
 
 type userPresence struct {

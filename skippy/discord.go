@@ -51,6 +51,13 @@ func RunDiscord(
 	db Database,
 ) {
 	state := NewState(assistantID, token, stockAPIKey, weatherAPIKey)
+	// TODO: fix
+	state.openAIModel = config.OpenAIModel
+	scheduler, err := NewScheduler()
+	if err != nil {
+		log.Fatal("could not create scheduler", err)
+	}
+	scheduler.Start()
 
 	session, err := discordgo.New("Bot " + token)
 	if err != nil {
@@ -69,7 +76,7 @@ func RunDiscord(
 
 	dg := NewDiscordBot(session)
 	session.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
-		messageCreate(dg, m, client, state, config)
+		messageCreate(dg, m, client, state, scheduler, config)
 	})
 
 	session.AddHandler(
@@ -135,6 +142,7 @@ func messageCreate(
 	m *discordgo.MessageCreate,
 	client *openai.Client,
 	state *State,
+	scheduler *Scheduler,
 	config *Config,
 ) {
 	// Ignore all messages created by the bot itself
@@ -159,10 +167,12 @@ func messageCreate(
 			DEFAULT_INSTRUCTIONS,
 			client,
 			state,
+			scheduler,
 			config,
 		)
 		// value used by reminders to see if it needs to send another message to user
 		state.SetAwaitsResponse(m.ChannelID, false, client)
+		scheduler.CancelReminderJob(m.ChannelID)
 	}
 
 	role, roleMentioned := isRoleMentioned(dg, m)
@@ -177,6 +187,7 @@ func messageCreate(
 	message = replaceChannelIDs(message, m.MentionChannels)
 	message += "\n current time: "
 
+	// TODO: put in instructions
 	format := "Monday, Jan 02 at 03:04 PM"
 	message += time.Now().Format(format)
 	message += "\n User ID: " + m.Author.Mention()
@@ -196,8 +207,55 @@ func messageCreate(
 		DEFAULT_INSTRUCTIONS,
 		client,
 		state,
+		scheduler,
 		config,
 	)
+}
+
+// gets response from ai disables functions calls
+// only able of getting and sending a response
+func getAndSendResponseWithoutTools(
+	ctx context.Context,
+	dg DiscordSession,
+	dgChannID string,
+	messageReq openai.MessageRequest,
+	additionalInstructions string,
+	client *openai.Client,
+	state *State,
+) error {
+	dg.ChannelTyping(dgChannID)
+
+	log.Printf("Using message: %s\n", messageReq.Content)
+
+	log.Println("Attempting to get response...")
+
+	thread := state.GetOrCreateThread(dgChannID, client)
+	// lock the thread because we can't queue additional messages during a run
+	state.LockThread(dgChannID)
+	defer state.UnLockThread(dgChannID)
+
+	response, err := GetResponse(
+		ctx,
+		dg,
+		thread.openAIThread.ID,
+		dgChannID,
+		messageReq,
+		additionalInstructions,
+		true,
+		client,
+		state,
+		// TODO: find a better way to pass this optionally
+		nil,
+		nil,
+	)
+	if err != nil {
+		log.Println("Unable to get response: ", err)
+		response = ERROR_RESPONSE
+	}
+
+	err = sendChunkedChannelMessage(dg, dgChannID, response)
+	return err
+
 }
 
 func getAndSendResponse(
@@ -208,6 +266,7 @@ func getAndSendResponse(
 	additionalInstructions string,
 	client *openai.Client,
 	state *State,
+	scheduler *Scheduler,
 	config *Config,
 ) error {
 	dg.ChannelTyping(dgChannID)
@@ -228,8 +287,10 @@ func getAndSendResponse(
 		dgChannID,
 		messageReq,
 		additionalInstructions,
+		false,
 		client,
 		state,
+		scheduler,
 		config,
 	)
 	if err != nil {

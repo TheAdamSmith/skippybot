@@ -66,7 +66,7 @@ func StartRocketLeagueSession(
 					Role:    openai.ChatMessageRoleAssistant,
 					Content: gameInfo,
 				}
-				getAndSendResponse(
+				getAndSendResponseWithoutTools(
 					context.Background(),
 					dg,
 					channelID,
@@ -74,7 +74,6 @@ func StartRocketLeagueSession(
 					COMMENTATE_INSTRUCTIONS,
 					client,
 					state,
-					config,
 				)
 			case <-ctx.Done():
 				log.Println("Received cancel command")

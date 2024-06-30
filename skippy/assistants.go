@@ -61,17 +61,13 @@ func GetResponse(
 	dgChannID string,
 	messageReq openai.MessageRequest,
 	additionalInstructions string,
+	disableFunctions bool,
 	client *openai.Client,
 	state *State,
+	scheduler *Scheduler,
 	config *Config,
 ) (string, error) {
 	assistantID := state.GetAssistantID()
-
-	// TODO: this should be a param
-	disableFunctions, ok := ctx.Value(DisableFunctions).(bool)
-	if !ok {
-		disableFunctions = false
-	}
 
 	_, err := client.CreateMessage(ctx, threadID, messageReq)
 	if err != nil {
@@ -82,7 +78,7 @@ func GetResponse(
 	runReq := openai.RunRequest{
 		AssistantID:            assistantID,
 		AdditionalInstructions: additionalInstructions,
-		Model:                  config.OpenAIModel,
+		Model:                  state.openAIModel,
 	}
 
 	if disableFunctions {
@@ -138,7 +134,10 @@ func GetResponse(
 			return message, nil
 
 		case openai.RunStatusRequiresAction:
-			run, err = handleRequiresAction(dg, run, dgChannID, threadID, client, state, config)
+			if disableFunctions || config == nil {
+				return "", fmt.Errorf("recieved required action when tools disabled")
+			}
+			run, err = handleRequiresAction(dg, run, dgChannID, threadID, client, state, scheduler, config)
 			if err != nil {
 				return "", err
 			}
@@ -160,6 +159,7 @@ func handleRequiresAction(
 	threadID string,
 	client *openai.Client,
 	state *State,
+	scheduler *Scheduler,
 	config *Config,
 ) (openai.Run, error) {
 	funcArgs := GetFunctionArgs(run)
@@ -183,7 +183,7 @@ outerloop:
 		case GetStockPriceKey:
 			log.Println("get_stock_price()")
 
-			output, err := handleGetStockPrice(dg, funcArg, client, state)
+			output, err := handleGetStockPrice(funcArg, state)
 			if err != nil {
 				log.Println("error handling get_stock_price: ", err)
 			}
@@ -196,7 +196,7 @@ outerloop:
 		case GetWeatherKey:
 			log.Println(GetWeatherKey)
 
-			output, err := handleGetWeather(dg, funcArg, client, state)
+			output, err := handleGetWeather(funcArg, state)
 			if err != nil {
 				log.Println("error handling get_stock_price: ", err)
 			}
@@ -224,7 +224,16 @@ outerloop:
 			)
 		case SetReminder:
 			log.Println("set_reminder()")
-			output, err := setReminder(context.Background(), dg, funcArg, dgChannID, client, state, config)
+			output, err := setReminder(
+				context.Background(),
+				dg,
+				funcArg,
+				dgChannID,
+				client,
+				state,
+				scheduler,
+				config,
+			)
 			if err != nil {
 				log.Println("error sending channel message: ", err)
 			}
@@ -246,9 +255,7 @@ outerloop:
 }
 
 func handleGetWeather(
-	dg DiscordSession,
 	funcArg FuncArgs,
-	client *openai.Client,
 	state *State,
 ) (string, error) {
 	weatherFuncArgs := WeatherFuncArgs{}
@@ -270,9 +277,7 @@ func handleGetWeather(
 }
 
 func handleGetStockPrice(
-	dg DiscordSession,
 	funcArg FuncArgs,
-	client *openai.Client,
 	state *State,
 ) (string, error) {
 	stockFuncArgs := StockFuncArgs{}
@@ -353,6 +358,7 @@ func setReminder(
 	channelID string,
 	client *openai.Client,
 	state *State,
+	scheduler *Scheduler,
 	config *Config,
 ) (string, error) {
 	var channelMsg ReminderFuncArgs
@@ -370,80 +376,64 @@ func setReminder(
 		channelID,
 		duration,
 	)
-
-	time.AfterFunc(
+	scheduler.AddReminderJob(
+		channelID,
 		duration,
 		func() {
+			log.Println("scheduled reminder!")
 			sendChunkedChannelMessage(dg, channelID, channelMsg.Message)
 			state.SetAwaitsResponse(channelID, true, client)
-
-			go waitForReminderResponse(
-				dg,
-				channelID,
-				channelMsg.UserID,
-				client,
-				state,
-				config,
-			)
+			for _, duration := range config.ReminderDurations {
+				scheduler.AddReminderJob(channelID, duration, func() {
+					sendAdditionalReminder(
+						dg,
+						channelID,
+						channelMsg.UserID,
+						client,
+						state,
+					)
+				})
+			}
 		},
 	)
 
 	return "worked", nil
 }
 
-func waitForReminderResponse(
+func sendAdditionalReminder(
 	dg DiscordSession,
 	channelID string,
 	userID string,
 	client *openai.Client,
 	state *State,
-	config *Config,
 ) {
-	timer := time.NewTimer(0)
-	for i := 0; i < len(config.ReminderDurations); i++ {
-		timer.Reset(config.ReminderDurations[i])
-		<-timer.C
+	log.Println("sending another reminder")
 
-		thread, exists := state.GetThread(channelID)
-		if !exists {
-			return
-		}
-
-		// this value is reset on messageCreate
-		if !thread.awaitsResponse {
-			timer.Stop()
-			return
-		}
-
-		log.Println("sending another reminder")
-
-		// TODO: they should not get mentioned
-		if userID == "" {
-			userID = "they"
-		}
-
-		// TODO: maybe add this to additional_instruction
-		message := fmt.Sprintf(
-			"It looks %s haven't responsed to this reminder can you generate a response nagging them about it. This is not a tool request.",
-			UserMention(userID),
-		)
-
-		messageReq := openai.MessageRequest{
-			Role:    openai.ChatMessageRoleAssistant,
-			Content: message,
-		}
-
-		getAndSendResponse(
-			context.Background(),
-			dg,
-			channelID,
-			messageReq,
-			DEFAULT_INSTRUCTIONS,
-			client,
-			state,
-			config,
-		)
+	// TODO: they should not get mentioned
+	if userID == "" {
+		userID = "they"
 	}
+
+	// TODO: maybe add this to additional_instruction
+	message := fmt.Sprintf(
+		"It looks %s haven't responsed to this reminder can you generate a response nagging them about it. This is not a tool request.",
+		UserMention(userID),
+	)
+
+	messageReq := openai.MessageRequest{
+		Role:    openai.ChatMessageRoleAssistant,
+		Content: message,
+	}
+
+	getAndSendResponseWithoutTools(
+		context.Background(),
+		dg,
+		channelID,
+		messageReq,
+		DEFAULT_INSTRUCTIONS,
+		client,
+		state,
+	)
 }
 
 func UserMention(userID string) string {
@@ -521,7 +511,7 @@ func toggleMorningMsg(
 		channelID,
 		client,
 		state,
-		config)
+	)
 
 	return "worked"
 }
@@ -535,7 +525,6 @@ func startMorningMessageLoop(
 	channelID string,
 	client *openai.Client,
 	state *State,
-	config *Config,
 ) {
 	ticker := time.NewTicker(duration)
 
@@ -587,7 +576,7 @@ func startMorningMessageLoop(
 			// reset the thread every morning
 			state.ResetOpenAIThread(channelID, client)
 
-			getAndSendResponse(
+			getAndSendResponseWithoutTools(
 				ctx,
 				dg,
 				channelID,
@@ -595,7 +584,6 @@ func startMorningMessageLoop(
 				MORNING_MESSAGE_INSTRUCTIONS,
 				client,
 				state,
-				config,
 			)
 
 			if duration != 24*time.Hour {
