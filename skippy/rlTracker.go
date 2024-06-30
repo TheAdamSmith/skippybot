@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bwmarrin/discordgo"
 	"github.com/sashabaranov/go-openai"
 )
 
@@ -41,11 +40,11 @@ func StartRocketLeagueSession(
 	ctx context.Context,
 	filePath string,
 	channelID string,
-	dg *discordgo.Session,
+	dg DiscordSession,
 	state *State,
 	client *openai.Client,
+	config *Config,
 ) error {
-
 	fileCh := make(chan string)
 
 	if filePath != "" {
@@ -75,6 +74,7 @@ func StartRocketLeagueSession(
 					COMMENTATE_INSTRUCTIONS,
 					client,
 					state,
+					config,
 				)
 			case <-ctx.Done():
 				log.Println("Received cancel command")
@@ -84,8 +84,8 @@ func StartRocketLeagueSession(
 	}()
 
 	return nil
-
 }
+
 func WatchFolder(filePath string, ch chan<- string, interval time.Duration) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {

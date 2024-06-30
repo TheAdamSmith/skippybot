@@ -22,10 +22,10 @@ type State struct {
 }
 
 type userPresence struct {
-	status        discordgo.Status
-	isPlayingGame bool
-	game          string
-	timeStarted   time.Time
+	Status        discordgo.Status
+	IsPlayingGame bool
+	Game          string
+	TimeStarted   time.Time
 }
 
 type chatThread struct {
@@ -35,6 +35,7 @@ type chatThread struct {
 	// TODO: this is can be used across multiple things ()
 	// should update this to use separate params
 	cancelFunc context.CancelFunc
+	mu         sync.Mutex
 	// messages []string
 	// reponses []string
 }
@@ -87,6 +88,19 @@ func (s *State) SetThread(threadID string, thread *chatThread) {
 	s.threadMap[threadID] = thread
 }
 
+// used for locking a specific chat Thread
+// does not lock state
+// CALLER MUST CALL UnLockThread
+func (s *State) LockThread(threadID string) {
+	s.threadMap[threadID].mu.Lock()
+}
+
+// unlocks a specific chat thread
+// does not unlock state
+func (s *State) UnLockThread(threadID string) {
+	s.threadMap[threadID].mu.Unlock()
+}
+
 func (s *State) AddCancelFunc(
 	threadID string,
 	cancelFunc context.CancelFunc,
@@ -102,6 +116,13 @@ func (s *State) AddCancelFunc(
 	s.threadMap[threadID].cancelFunc = cancelFunc
 }
 
+func (s *State) GetCancelFunc(threadID string) (context.CancelFunc, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	cancelFunc := s.threadMap[threadID].cancelFunc
+	return cancelFunc, cancelFunc != nil
+}
+
 func (s *State) UpdatePresence(
 	userID string,
 	status discordgo.Status,
@@ -112,10 +133,10 @@ func (s *State) UpdatePresence(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.userPresenceMap[userID] = userPresence{
-		status:        status,
-		isPlayingGame: isPlayingGame,
-		game:          game,
-		timeStarted:   timeStarted,
+		Status:        status,
+		IsPlayingGame: isPlayingGame,
+		Game:          game,
+		TimeStarted:   timeStarted,
 	}
 }
 
@@ -149,15 +170,28 @@ func (s *State) ResetOpenAIThread(threadID string, client *openai.Client) error 
 }
 
 func (s *State) ToggleAlwaysRespond(threadID string, client *openai.Client) bool {
+	log.Println("Toggling always respond")
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	_, threadExists := s.threadMap[threadID]
 	if !threadExists {
+		s.mu.Unlock()
 		s.ResetOpenAIThread(threadID, client)
+		s.mu.Lock()
 	}
 	updateVal := !s.threadMap[threadID].alwaysRespond
 	s.threadMap[threadID].alwaysRespond = updateVal
+	s.mu.Unlock()
 	return updateVal
+}
+
+func (s *State) GetAlwaysRespond(threadID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	thread, exists := s.threadMap[threadID]
+	if !exists {
+		return false
+	}
+	return thread.alwaysRespond
 }
 
 func (s *State) SetAwaitsResponse(threadID string, awaitsResponse bool, client *openai.Client) {
@@ -168,6 +202,16 @@ func (s *State) SetAwaitsResponse(threadID string, awaitsResponse bool, client *
 		s.ResetOpenAIThread(threadID, client)
 	}
 	s.threadMap[threadID].awaitsResponse = awaitsResponse
+}
+
+func (s *State) GetAwaitsResponse(threadID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	thread, exists := s.threadMap[threadID]
+	if !exists {
+		return false
+	}
+	return thread.awaitsResponse
 }
 
 func (s *State) GetDiscordToken() string {

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bwmarrin/discordgo"
 	openai "github.com/sashabaranov/go-openai"
 )
 
@@ -57,17 +56,18 @@ type ReminderFuncArgs struct {
 
 func GetResponse(
 	ctx context.Context,
-	dg *discordgo.Session,
+	dg DiscordSession,
 	threadID string,
 	dgChannID string,
 	messageReq openai.MessageRequest,
-	state *State,
-	client *openai.Client,
 	additionalInstructions string,
+	client *openai.Client,
+	state *State,
+	config *Config,
 ) (string, error) {
-
 	assistantID := state.GetAssistantID()
 
+	// TODO: this should be a param
 	disableFunctions, ok := ctx.Value(DisableFunctions).(bool)
 	if !ok {
 		disableFunctions = false
@@ -82,7 +82,7 @@ func GetResponse(
 	runReq := openai.RunRequest{
 		AssistantID:            assistantID,
 		AdditionalInstructions: additionalInstructions,
-		Model:                  openai.GPT4o,
+		Model:                  config.OpenAIModel,
 	}
 
 	if disableFunctions {
@@ -138,7 +138,7 @@ func GetResponse(
 			return message, nil
 
 		case openai.RunStatusRequiresAction:
-			run, err = handleRequiresAction(dg, run, dgChannID, threadID, state, client)
+			run, err = handleRequiresAction(dg, run, dgChannID, threadID, client, state, config)
 			if err != nil {
 				return "", err
 			}
@@ -154,14 +154,14 @@ func GetResponse(
 }
 
 func handleRequiresAction(
-	dg *discordgo.Session,
+	dg DiscordSession,
 	run openai.Run,
 	dgChannID string,
 	threadID string,
-	state *State,
 	client *openai.Client,
+	state *State,
+	config *Config,
 ) (openai.Run, error) {
-
 	funcArgs := GetFunctionArgs(run)
 
 	var toolOutputs []openai.ToolOutput
@@ -172,7 +172,7 @@ outerloop:
 		switch funcName := funcArg.FuncName; funcName {
 		case ToggleMorningMessage:
 			log.Println("toggle_morning_message()")
-			output, err := handleMorningMessage(dg, funcArg, dgChannID, client, state)
+			output, err := handleMorningMessage(dg, funcArg, dgChannID, client, state, config)
 			if err != nil {
 				log.Println("error handling morning message: ", err)
 			}
@@ -224,7 +224,7 @@ outerloop:
 			)
 		case SetReminder:
 			log.Println("set_reminder()")
-			output, err := setReminder(context.Background(), dg, funcArg, dgChannID, client, state)
+			output, err := setReminder(context.Background(), dg, funcArg, dgChannID, client, state, config)
 			if err != nil {
 				log.Println("error sending channel message: ", err)
 			}
@@ -243,17 +243,14 @@ outerloop:
 		}
 	}
 	return submitToolOutputs(client, toolOutputs, threadID, run.ID)
-
 }
 
 func handleGetWeather(
-	dg *discordgo.Session,
+	dg DiscordSession,
 	funcArg FuncArgs,
 	client *openai.Client,
 	state *State,
-
 ) (string, error) {
-
 	weatherFuncArgs := WeatherFuncArgs{}
 	err := json.Unmarshal([]byte(funcArg.JsonValue), &weatherFuncArgs)
 	if err != nil {
@@ -273,12 +270,11 @@ func handleGetWeather(
 }
 
 func handleGetStockPrice(
-	dg *discordgo.Session,
+	dg DiscordSession,
 	funcArg FuncArgs,
 	client *openai.Client,
 	state *State,
 ) (string, error) {
-
 	stockFuncArgs := StockFuncArgs{}
 	err := json.Unmarshal([]byte(funcArg.JsonValue), &stockFuncArgs)
 	if err != nil {
@@ -298,13 +294,13 @@ func handleGetStockPrice(
 }
 
 func handleMorningMessage(
-	dg *discordgo.Session,
+	dg DiscordSession,
 	funcArg FuncArgs,
 	dgChannID string,
 	client *openai.Client,
 	state *State,
+	config *Config,
 ) (string, error) {
-
 	morningMsgFuncArgs := MorningMsgFuncArgs{}
 	err := json.Unmarshal([]byte(funcArg.JsonValue), &morningMsgFuncArgs)
 	if err != nil {
@@ -318,6 +314,7 @@ func handleMorningMessage(
 		dgChannID,
 		client,
 		state,
+		config,
 	)
 
 	return output, nil
@@ -325,14 +322,12 @@ func handleMorningMessage(
 
 func getAndSendImage(
 	ctx context.Context,
-	dg *discordgo.Session,
+	dg DiscordSession,
 	funcArg FuncArgs,
 	channelID string,
 	client *openai.Client,
 	state *State,
-
 ) (string, error) {
-
 	generateImageFuncArgs := GenerateImageFuncArgs{}
 	err := json.Unmarshal([]byte(funcArg.JsonValue), &generateImageFuncArgs)
 	if err != nil {
@@ -353,13 +348,13 @@ func getAndSendImage(
 
 func setReminder(
 	ctx context.Context,
-	dg *discordgo.Session,
+	dg DiscordSession,
 	funcArg FuncArgs,
 	channelID string,
 	client *openai.Client,
 	state *State,
+	config *Config,
 ) (string, error) {
-
 	var channelMsg ReminderFuncArgs
 
 	err := json.Unmarshal([]byte(funcArg.JsonValue), &channelMsg)
@@ -388,6 +383,7 @@ func setReminder(
 				channelMsg.UserID,
 				client,
 				state,
+				config,
 			)
 		},
 	)
@@ -396,37 +392,32 @@ func setReminder(
 }
 
 func waitForReminderResponse(
-	dg *discordgo.Session,
+	dg DiscordSession,
 	channelID string,
 	userID string,
 	client *openai.Client,
 	state *State,
+	config *Config,
 ) {
-
-	maxRemind := 5
-	timeoutMin := 20 * time.Second
-	timer := time.NewTimer(timeoutMin)
-
-	reminds := 0
-	for {
-
+	timer := time.NewTimer(0)
+	for i := 0; i < len(config.ReminderDurations); i++ {
+		timer.Reset(config.ReminderDurations[i])
 		<-timer.C
+
 		thread, exists := state.GetThread(channelID)
 		if !exists {
 			return
 		}
+
 		// this value is reset on messageCreate
-		if !thread.awaitsResponse || reminds == maxRemind {
+		if !thread.awaitsResponse {
 			timer.Stop()
 			return
 		}
 
-		reminds++
-		timeoutMin = timeoutMin * 2
-		timer.Reset(timeoutMin)
-
 		log.Println("sending another reminder")
 
+		// TODO: they should not get mentioned
 		if userID == "" {
 			userID = "they"
 		}
@@ -434,7 +425,7 @@ func waitForReminderResponse(
 		// TODO: maybe add this to additional_instruction
 		message := fmt.Sprintf(
 			"It looks %s haven't responsed to this reminder can you generate a response nagging them about it. This is not a tool request.",
-			mention(userID),
+			Mention(userID),
 		)
 
 		messageReq := openai.MessageRequest{
@@ -450,26 +441,26 @@ func waitForReminderResponse(
 			DEFAULT_INSTRUCTIONS,
 			client,
 			state,
+			config,
 		)
 	}
-
 }
 
-func mention(userID string) string {
+func Mention(userID string) string {
 	if strings.HasPrefix(userID, "<@") && strings.HasSuffix(userID, ">") {
 		return userID
 	}
-	return fmt.Sprint("<@%s>", userID)
+	return fmt.Sprintf("<@%s>", userID)
 }
 
 func toggleMorningMsg(
-	dg *discordgo.Session,
+	dg DiscordSession,
 	morningMsgFuncArgs MorningMsgFuncArgs,
 	channelID string,
 	client *openai.Client,
 	state *State,
+	config *Config,
 ) string {
-
 	if !morningMsgFuncArgs.Enable {
 		thread, exists := state.GetThread(channelID)
 		if !exists {
@@ -486,12 +477,19 @@ func toggleMorningMsg(
 		return "worked"
 	}
 
-	const timeFmt = "15:04"
+	// TODO: this is hacky
+	// this should be fixed in the ai funciton definition
+	timeFmt := "15:04"
 	log.Println("Given time is: ", morningMsgFuncArgs.Time)
 	givenTime, err := time.Parse(timeFmt, morningMsgFuncArgs.Time)
 	if err != nil {
-		log.Println("could not format time: ", err)
-		return "could not format time"
+		log.Printf("could not format time: %s. attempting to use AM/PM format", err)
+		timeFmt := "3:04 PM"
+		givenTime, err = time.Parse(timeFmt, morningMsgFuncArgs.Time)
+		if err != nil {
+			log.Printf("could not format time: %s.", err)
+			return "could not format time"
+		}
 
 	}
 
@@ -522,7 +520,8 @@ func toggleMorningMsg(
 		duration,
 		channelID,
 		client,
-		state)
+		state,
+		config)
 
 	return "worked"
 }
@@ -530,14 +529,14 @@ func toggleMorningMsg(
 // TODO: group all timer calls into a common scheduler
 func startMorningMessageLoop(
 	ctx context.Context,
-	dg *discordgo.Session,
+	dg DiscordSession,
 	morningMsgFuncArgs MorningMsgFuncArgs,
 	duration time.Duration,
 	channelID string,
 	client *openai.Client,
 	state *State,
+	config *Config,
 ) {
-
 	ticker := time.NewTicker(duration)
 
 	for {
@@ -596,6 +595,7 @@ func startMorningMessageLoop(
 				MORNING_MESSAGE_INSTRUCTIONS,
 				client,
 				state,
+				config,
 			)
 
 			if duration != 24*time.Hour {
@@ -610,8 +610,8 @@ func submitToolOutputs(
 	client *openai.Client,
 	toolOutputs []openai.ToolOutput,
 	threadID string,
-	runID string) (run openai.Run, err error) {
-
+	runID string,
+) (run openai.Run, err error) {
 	req := openai.SubmitToolOutputsRequest{
 		ToolOutputs: toolOutputs,
 	}
@@ -636,6 +636,7 @@ func makeNoOpToolOutputs(funcArgs []FuncArgs, toolID string, output string) []op
 	}
 	return toolOutputs
 }
+
 func GetFunctionArgs(r openai.Run) []FuncArgs {
 	toolCalls := r.RequiredAction.SubmitToolOutputs.ToolCalls
 	result := make([]FuncArgs, len(toolCalls))
@@ -652,7 +653,6 @@ func GetFunctionArgs(r openai.Run) []FuncArgs {
 func getFirstMessage(messageList openai.MessagesList) (string, error) {
 	if len(messageList.Messages) <= 0 || messageList.FirstID == nil {
 		return "", errors.New("recieved zero length message list")
-
 	}
 	firstId := messageList.FirstID
 	for _, message := range messageList.Messages {

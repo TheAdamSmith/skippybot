@@ -4,6 +4,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 
@@ -12,10 +13,14 @@ import (
 	openai "github.com/sashabaranov/go-openai"
 )
 
-func main() {
+const (
+	DEBOUNCE_DELAY            = 100 * time.Millisecond
+	MIN_GAME_SESSION_DURATION = 10 * time.Minute
+)
 
+func main() {
 	// Create or open a file for logging
-	file, err := os.OpenFile("skippy.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	file, err := os.OpenFile("skippy.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
 	if err != nil {
 		log.Fatalf("Failed to open log file: %v", err)
 	}
@@ -58,5 +63,25 @@ func main() {
 	if err != nil {
 		log.Fatalln("Unable to get database connection", err)
 	}
-	skippy.RunDiscord(token, assistantID, stockPriceAPIKey, weatherAPIKey, client, db)
+
+	config := &skippy.Config{
+		PresenceUpdateDebouncDelay: DEBOUNCE_DELAY,
+		MinGameSessionDuration:     MIN_GAME_SESSION_DURATION,
+		ReminderDurations: []time.Duration{
+			time.Minute * 10,
+			time.Minute * 30,
+			time.Minute * 90,
+			time.Hour * 3,
+		},
+		OpenAIModel: openai.GPT4o,
+	}
+
+	skippy.RunDiscord(
+		token,
+		assistantID,
+		stockPriceAPIKey,
+		weatherAPIKey,
+		client,
+		config,
+		db)
 }
