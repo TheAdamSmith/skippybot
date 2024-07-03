@@ -254,13 +254,14 @@ loop:
 		t.Fatal("Expected morning message to be sent")
 	}
 
-	if _, exists := state.GetCancelFunc(channelID); !exists {
-		t.Fatal("Expected thread to have a cancelFunc")
-	}
-
 	if !dg.channelTypingCalled[channelID] {
 		t.Error("Expected ChannelTyping to be called")
 	}
+
+	if !scheduler.HasMorningMsgJob(channelID) {
+		t.Error("Expected job to be scheduled")
+	}
+
 	content = "cancel the morning message"
 
 	msg = &discordgo.MessageCreate{
@@ -284,6 +285,11 @@ loop:
 	if len(dg.channelMessages[channelID]) != 3 {
 		t.Error("Expected morning message to be canceled")
 	}
+
+	if scheduler.HasMorningMsgJob(channelID) {
+		t.Error("Expected job to be canceled")
+	}
+
 	if checkForErrorResponse(dg.channelMessages[channelID]) {
 		t.Error("Expected message to not have error response")
 	}
