@@ -54,6 +54,12 @@ type ReminderFuncArgs struct {
 	UserID      string `json:"user_id,omitempty"`
 }
 
+// Gets a response from the ai.
+//
+// Sends message to thread, generates and executes a run.
+//
+// scheduler and config are nullable when disableFunctions is true.
+// Will handle functions calls otherwise
 func GetResponse(
 	ctx context.Context,
 	dg DiscordSession,
@@ -64,7 +70,9 @@ func GetResponse(
 	disableFunctions bool,
 	client *openai.Client,
 	state *State,
+	// nullable if disableFunctions is true
 	scheduler *Scheduler,
+	// nullable if disableFunctions is true
 	config *Config,
 ) (string, error) {
 	assistantID := state.GetAssistantID()
@@ -134,7 +142,7 @@ func GetResponse(
 			return message, nil
 
 		case openai.RunStatusRequiresAction:
-			if disableFunctions || config == nil {
+			if disableFunctions || config == nil || scheduler == nil {
 				return "", fmt.Errorf("recieved required action when tools disabled")
 			}
 			run, err = handleRequiresAction(ctx, dg, run, dgChannID, threadID, client, state, scheduler, config)

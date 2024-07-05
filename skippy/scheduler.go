@@ -10,6 +10,7 @@ import (
 const (
 	REMINDER_TAG    = "%s|REMINDER"
 	MORNING_MSG_TAG = "%s|MORNING_MSG"
+	DURATION_TAG    = "POLL"
 	DAILY_INTERVAL  = 1
 )
 
@@ -27,6 +28,25 @@ func NewScheduler() (*Scheduler, error) {
 		Scheduler: scheduler,
 		jobSet:    make(map[string]bool),
 	}, nil
+}
+
+// TODO: return id
+func (s *Scheduler) AddDurationJob(duration time.Duration, jobFunc interface{}) error {
+	_, err := s.NewJob(
+		gocron.DurationJob(duration),
+		gocron.NewTask(jobFunc),
+		gocron.WithTags(DURATION_TAG),
+	)
+	if err != nil {
+		return err
+	}
+	s.jobSet[DURATION_TAG] = true
+	return nil
+}
+
+func (s *Scheduler) CancelDurationJob() {
+	s.RemoveByTags(DURATION_TAG)
+	delete(s.jobSet, DURATION_TAG)
 }
 
 func (s *Scheduler) AddReminderJob(channelID string, duration time.Duration, jobFunc interface{}) error {

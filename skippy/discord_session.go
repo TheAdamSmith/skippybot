@@ -28,6 +28,8 @@ type DiscordSession interface {
 		options ...discordgo.RequestOption,
 	) error
 
+	UserChannelCreate(recipientID string, options ...discordgo.RequestOption) (*discordgo.Channel, error)
+
 	// wraps discordgo.Session.State
 	GetState() *discordgo.State
 }

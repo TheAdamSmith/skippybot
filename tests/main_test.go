@@ -140,6 +140,12 @@ func setup() (
 	}
 	scheduler.Start()
 
+	userConfigMap := make(map[string]skippy.UserConfig)
+	userConfigMap[USER_ID] = skippy.UserConfig{
+		DailyLimit:  1 * time.Second,
+		WeeklyLimit: 1 * time.Second,
+	}
+
 	config = &skippy.Config{
 		MinGameSessionDuration:     time.Nanosecond * 1,
 		PresenceUpdateDebouncDelay: time.Millisecond * 100,
@@ -148,7 +154,8 @@ func setup() (
 			time.Millisecond * 50,
 			time.Hour,
 		},
-		OpenAIModel: openai.GPT3Dot5Turbo,
+		OpenAIModel:   openai.GPT3Dot5Turbo,
+		UserConfigMap: userConfigMap,
 	}
 
 	return

@@ -75,6 +75,11 @@ func RunDiscord(
 	session.State.TrackMembers = true
 
 	dg := NewDiscordBot(session)
+
+	scheduler.AddDurationJob(15*time.Second, func() {
+		pollPresenceStatus(context.Background(), dg, client, state, db, config)
+	})
+
 	session.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
 		messageCreate(dg, m, client, state, scheduler, config)
 	})
@@ -212,8 +217,8 @@ func messageCreate(
 	)
 }
 
-// gets response from ai disables functions calls
-// only able of getting and sending a response
+// Gets response from ai disables functions calls.
+// Only able of getting and sending a response
 func getAndSendResponseWithoutTools(
 	ctx context.Context,
 	dg DiscordSession,
@@ -300,87 +305,4 @@ func getAndSendResponse(
 
 	err = sendChunkedChannelMessage(dg, dgChannID, response)
 	return err
-}
-
-func onPresenceUpdateDebounce(
-	dg DiscordSession,
-	p *discordgo.PresenceUpdate,
-	s *State,
-	db Database,
-	debouncer *Debouncer,
-	config *Config,
-) {
-	debouncer.Debounce(p.User.ID, func() {
-		onPresenceUpdate(dg, p, s, db, config)
-	})
-}
-
-func onPresenceUpdate(
-	dg DiscordSession,
-	p *discordgo.PresenceUpdate,
-	s *State,
-	db Database,
-	config *Config,
-) {
-	game, isPlayingGame := getCurrentGame(p)
-	isPlayingGame = isPlayingGame && game != ""
-
-	userPresence, exists := s.GetPresence(p.User.ID)
-
-	member, err := dg.GetState().Member(p.GuildID, p.User.ID)
-	if err != nil {
-		log.Println("Could not get user: ", err)
-		return
-	}
-
-	startedPlaying := isPlayingGame &&
-		(!exists || exists && !userPresence.IsPlayingGame)
-	stoppedPlaying := exists && userPresence.IsPlayingGame && !isPlayingGame
-
-	if startedPlaying {
-		log.Printf("User %s started playing %s\n", member.User.Username, game)
-		s.UpdatePresence(p.User.ID, p.Status, isPlayingGame, game, time.Now())
-	}
-
-	if stoppedPlaying {
-
-		duration := time.Since(userPresence.TimeStarted)
-
-		log.Printf(
-			"User %s stopped playing game %s, after %s\n",
-			member.User.Username,
-			userPresence.Game,
-			duration,
-		)
-
-		// this state update must be done before the db call to avoid race conditions
-		// later me: probably not required cuz debounced now
-		s.UpdatePresence(p.User.ID, p.Status, isPlayingGame, "", time.Time{})
-
-		if duration < config.MinGameSessionDuration {
-			return
-		}
-
-		userSession := &GameSession{
-			UserID:    p.User.ID,
-			Game:      userPresence.Game,
-			StartedAt: userPresence.TimeStarted,
-			Duration:  duration,
-		}
-
-		err = db.CreateGameSession(userSession)
-		if err != nil {
-			log.Println("Unable to create game session: ", err)
-		}
-
-	}
-}
-
-func getCurrentGame(p *discordgo.PresenceUpdate) (string, bool) {
-	for _, activity := range p.Activities {
-		if activity.Type == discordgo.ActivityTypeGame {
-			return activity.Name, true
-		}
-	}
-	return "", false
 }

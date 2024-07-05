@@ -4,16 +4,13 @@ import (
 	"context"
 	"log"
 	"sync"
-	"time"
 
 	openai "github.com/sashabaranov/go-openai"
-
-	"github.com/bwmarrin/discordgo"
 )
 
 type State struct {
-	threadMap       map[string]*chatThread
-	userPresenceMap map[string]userPresence
+	threadMap       map[string]*ChatThread
+	userPresenceMap map[string]UserPresence
 	assistantID     string
 	mu              sync.RWMutex
 	discordToken    string
@@ -26,14 +23,7 @@ type State struct {
 	openAIModel string
 }
 
-type userPresence struct {
-	Status        discordgo.Status
-	IsPlayingGame bool
-	Game          string
-	TimeStarted   time.Time
-}
-
-type chatThread struct {
+type ChatThread struct {
 	openAIThread   openai.Thread
 	awaitsResponse bool
 	alwaysRespond  bool
@@ -52,8 +42,8 @@ func NewState(
 	weatherApiKey string,
 ) *State {
 	return &State{
-		threadMap:       make(map[string]*chatThread),
-		userPresenceMap: make(map[string]userPresence),
+		threadMap:       make(map[string]*ChatThread),
+		userPresenceMap: make(map[string]UserPresence),
 		assistantID:     assistantID,
 		discordToken:    discordToken,
 		stockApiKey:     stockApiKey,
@@ -61,7 +51,7 @@ func NewState(
 	}
 }
 
-func (s *State) GetThread(threadID string) (*chatThread, bool) {
+func (s *State) GetThread(threadID string) (*ChatThread, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	thread, exists := s.threadMap[threadID]
@@ -69,7 +59,7 @@ func (s *State) GetThread(threadID string) (*chatThread, bool) {
 }
 
 // TODO: should return error
-func (s *State) GetOrCreateThread(threadID string, client *openai.Client) *chatThread {
+func (s *State) GetOrCreateThread(threadID string, client *openai.Client) *ChatThread {
 	s.mu.RLock()
 	thread, exists := s.threadMap[threadID]
 	if exists {
@@ -87,7 +77,7 @@ func (s *State) GetOrCreateThread(threadID string, client *openai.Client) *chatT
 	return thread
 }
 
-func (s *State) SetThread(threadID string, thread *chatThread) {
+func (s *State) SetThread(threadID string, thread *ChatThread) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	s.threadMap[threadID] = thread
@@ -128,29 +118,30 @@ func (s *State) GetCancelFunc(threadID string) (context.CancelFunc, bool) {
 	return cancelFunc, cancelFunc != nil
 }
 
-func (s *State) UpdatePresence(
-	userID string,
-	status discordgo.Status,
-	isPlayingGame bool,
-	game string,
-	timeStarted time.Time,
-) {
+func (s *State) UpdatePresence(userID string, opts ...UserPresenceOption) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.userPresenceMap[userID] = userPresence{
-		Status:        status,
-		IsPlayingGame: isPlayingGame,
-		Game:          game,
-		TimeStarted:   timeStarted,
+
+	original, exists := s.userPresenceMap[userID]
+	if !exists {
+		original = UserPresence{}
 	}
+
+	for _, opt := range opts {
+		opt(&original)
+	}
+
+	log.Println("PRESENCE UPDATE", original)
+
+	s.userPresenceMap[userID] = original
 }
 
-func (s *State) GetPresence(userID string) (userPresence, bool) {
+func (s *State) GetPresence(userID string) (UserPresence, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	presence, exists := s.userPresenceMap[userID]
 	if !exists {
-		return userPresence{}, false
+		return UserPresence{}, false
 	}
 	return presence, true
 }
@@ -166,7 +157,7 @@ func (s *State) ResetOpenAIThread(threadID string, client *openai.Client) error 
 
 	_, exists := s.threadMap[threadID]
 	if !exists {
-		s.threadMap[threadID] = &chatThread{}
+		s.threadMap[threadID] = &ChatThread{}
 	}
 
 	s.threadMap[threadID].openAIThread = thread

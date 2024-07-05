@@ -8,4 +8,5 @@ var (
 	OnCommand                = onCommand
 	OnPresenceUpdate         = onPresenceUpdate
 	OnPresenceUpdateDebounce = onPresenceUpdateDebounce
+	PollPresenceStatus       = pollPresenceStatus
 )

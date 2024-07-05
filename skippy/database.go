@@ -16,6 +16,7 @@ type Database interface {
 		userID string,
 		daysAgo int,
 	) ([]GameSession, error)
+	GetGameSessionSum(userID string, daysAgo int) (time.Duration, error)
 	Close() error
 }
 
@@ -103,4 +104,18 @@ func (db *DB) GetGameSessionsByUserAndDays(
 		Find(&gs).
 		Error
 	return gs, err
+}
+
+func (db *DB) GetGameSessionSum(userID string, daysAgo int) (time.Duration, error) {
+	now := time.Now()
+	cutoff := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).
+		AddDate(0, 0, -daysAgo)
+
+	var totDuration time.Duration
+	err := db.Model(&GameSession{}).
+		Select("IFNULL(SUM(duration), 0)").
+		Where("user_id = ? AND started_at >=?", userID, cutoff).
+		Scan(&totDuration).Error
+
+	return totDuration, err
 }

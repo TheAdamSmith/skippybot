@@ -63,6 +63,10 @@ func main() {
 	if err != nil {
 		log.Fatalln("Unable to get database connection", err)
 	}
+	userMap := make(map[string]skippy.UserConfig)
+	userMap["369593847862525952"] = skippy.UserConfig{
+		DailyLimit: time.Duration(1 * time.Second),
+	}
 
 	config := &skippy.Config{
 		PresenceUpdateDebouncDelay: DEBOUNCE_DELAY,
@@ -73,7 +77,8 @@ func main() {
 			time.Minute * 90,
 			time.Hour * 3,
 		},
-		OpenAIModel: openai.GPT4o,
+		OpenAIModel:   openai.GPT4o,
+		UserConfigMap: userMap,
 	}
 
 	skippy.RunDiscord(
