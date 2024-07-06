@@ -2,6 +2,8 @@ package skippy
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
 	"time"
 
@@ -88,6 +90,7 @@ func pollPresenceStatus(
 	db Database,
 	config *Config,
 ) {
+	log.Println("Polling...")
 	now := time.Now()
 	for userID, userConfig := range config.UserConfigMap {
 		totTime := time.Duration(0)
@@ -107,17 +110,59 @@ func pollPresenceStatus(
 
 		totTime = totTime + storedDuration
 		if totTime > userConfig.DailyLimit {
-			// TODO: send on the config channel if it exists
-			log.Printf("User (%s) hit limit. Attempting to send reminder on %s.\n", userID, userConfig.LimitReminderChannelID)
-			channel, err := dg.UserChannelCreate(userID)
+			channelID := config.UserConfigMap[userID].LimitReminderChannelID
+			if channelID == "" {
+				channel, err := dg.UserChannelCreate(userID)
+				if err != nil {
+					log.Println("could not create user channel", err)
+					continue
+				}
+				channelID = channel.ID
+			}
+
+			log.Printf("User (%s) hit limit. Attempting to send reminder on %s.\n", userID, channelID)
+
+			sessions, err := db.GetGameSessionsByUserAndDays(userID, 0)
 			if err != nil {
+				log.Println("Unable to get game sessions: ", err)
+				continue
+			}
+
+			aiGameSessions := ToGameSessionAI(sessions)
+
+			if exists && presence.IsPlayingGame {
+				aiGameSessions = append(aiGameSessions, GameSessionAI{
+					Game:        presence.Game,
+					StartedAt:   presence.TimeStarted,
+					HoursPlayed: time.Now().Sub(presence.TimeStarted).String(),
+				})
+			}
+
+			content := ""
+			if aiGameSessions == nil {
+				content = "Please respond saying that there were no games found for this user"
+			} else {
+				jsonData, err := json.Marshal(aiGameSessions)
+				if err != nil {
+					log.Println("Unable to marshal json: ", err)
+					continue
+				}
+				content = string(jsonData)
 			}
 			messageReq := openai.MessageRequest{
 				Role:    openai.ChatMessageRoleAssistant,
-				Content: "This user has exceeded their configured daily video game limit. Send them a message telling them",
+				Content: content,
 			}
-			// TODO: create instructions
-			err = getAndSendResponseWithoutTools(ctx, dg, channel.ID, messageReq, DEFAULT_INSTRUCTIONS, client, state)
+
+			err = getAndSendResponseWithoutTools(
+				ctx,
+				dg,
+				channelID,
+				messageReq,
+				fmt.Sprintf(GAME_LIMIT_REMINDER_INSTRUCTIONS_FORMAT, UserMention(userID)),
+				client,
+				state,
+			)
 			if err != nil {
 				log.Println("could not send response", err)
 				continue

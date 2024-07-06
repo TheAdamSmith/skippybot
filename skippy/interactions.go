@@ -214,7 +214,7 @@ func generateGameStats(
 
 	aiGameSessions := ToGameSessionAI(sessions)
 	content := ""
-	if aiGameSessions == nil {
+	if len(aiGameSessions) == 0 {
 		content = "Please respond saying that there were no games found for this user"
 	} else {
 		jsonData, err := json.Marshal(aiGameSessions)

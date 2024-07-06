@@ -36,6 +36,7 @@ type Game struct {
 	AwayTeam  map[string]PlayerStats `json:"away_team"`
 }
 
+// depreciated
 func StartRocketLeagueSession(
 	ctx context.Context,
 	filePath string,
