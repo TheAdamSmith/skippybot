@@ -20,5 +20,6 @@ type Config struct {
 type UserConfig struct {
 	DailyLimit             time.Duration
 	WeeklyLimit            time.Duration
+	Remind                 bool
 	LimitReminderChannelID string
 }

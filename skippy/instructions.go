@@ -13,7 +13,7 @@ const (
 	SEND_CHANNEL_MSG_INSTRUCTIONS   = `You are generating a message to send in a discord channel. Generate a message based on the prompt.`
 	GENERATE_GAME_STAT_INSTRUCTIONS = `You are summarizing a users game sessions. 
 	The message will be a a json formatted list of game sessions. 
-	Please summarise the results of the sessions including total hours played and the most played game.
+	Please summarise the results of the sessions including total hours played and the most played game. If multiple days are incluced give the breakdown by each day.
 	This is the user mention (%s) of the user you are summarizing. Please include it in your message.
 	`
 	GAME_LIMIT_REMINDER_INSTRUCTIONS_FORMAT = `You are reminding a discord user that they have exceeded their configured daily video game limit.

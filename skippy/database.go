@@ -30,18 +30,18 @@ type GameSession struct {
 }
 
 type GameSessionAI struct {
-	Game        string
-	StartedAt   time.Time
-	HoursPlayed string
+	Game       string
+	StartedAt  time.Time
+	TimePlayed string
 }
 
 func ToGameSessionAI(gs []GameSession) []GameSessionAI {
 	var gsai []GameSessionAI
 	for _, g := range gs {
 		gsai = append(gsai, GameSessionAI{
-			Game:        g.Game,
-			StartedAt:   g.StartedAt,
-			HoursPlayed: g.Duration.String(),
+			Game:       g.Game,
+			StartedAt:  g.StartedAt,
+			TimePlayed: g.Duration.String(),
 		})
 	}
 	return gsai

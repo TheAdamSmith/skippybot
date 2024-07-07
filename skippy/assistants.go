@@ -138,7 +138,7 @@ func GetResponse(
 			if err != nil {
 				return "", fmt.Errorf("unable to get first message: %s", err)
 			}
-			log.Println("Received response from ai: ", message)
+			log.Println("Received response from ai.")
 			return message, nil
 
 		case openai.RunStatusRequiresAction:

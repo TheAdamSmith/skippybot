@@ -31,6 +31,10 @@ func onPresenceUpdate(
 	db Database,
 	config *Config,
 ) {
+	if _, exists := config.UserConfigMap[p.User.ID]; !exists {
+		return
+	}
+
 	game, isPlayingGame := getCurrentGame(p)
 	isPlayingGame = isPlayingGame && game != ""
 
@@ -52,8 +56,10 @@ func onPresenceUpdate(
 	}
 
 	if stoppedPlaying {
-
 		duration := time.Since(userPresence.TimeStarted)
+		if duration < config.MinGameSessionDuration {
+			return
+		}
 
 		log.Printf(
 			"User %s stopped playing game %s, after %s\n",
@@ -75,10 +81,6 @@ func onPresenceUpdate(
 		}
 
 		s.UpdatePresence(p.User.ID, WithStatus(p.Status), WithIsPlayingGame(isPlayingGame), WithGame(""), WithTimeStarted(time.Time{}))
-
-		if duration < config.MinGameSessionDuration {
-			return
-		}
 	}
 }
 
@@ -90,12 +92,11 @@ func pollPresenceStatus(
 	db Database,
 	config *Config,
 ) {
-	log.Println("Polling...")
 	now := time.Now()
 	for userID, userConfig := range config.UserConfigMap {
 		totTime := time.Duration(0)
 		presence, exists := state.GetPresence(userID)
-		if exists && now.Sub(presence.LastLimitReminder) < 24*time.Hour {
+		if exists && now.Sub(presence.LastLimitReminder) < 24*time.Hour || !userConfig.Remind {
 			continue
 		}
 
@@ -132,9 +133,9 @@ func pollPresenceStatus(
 
 			if exists && presence.IsPlayingGame {
 				aiGameSessions = append(aiGameSessions, GameSessionAI{
-					Game:        presence.Game,
-					StartedAt:   presence.TimeStarted,
-					HoursPlayed: time.Now().Sub(presence.TimeStarted).String(),
+					Game:       presence.Game,
+					StartedAt:  presence.TimeStarted,
+					TimePlayed: time.Now().Sub(presence.TimeStarted).String(),
 				})
 			}
 

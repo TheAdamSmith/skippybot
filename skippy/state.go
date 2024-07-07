@@ -131,8 +131,6 @@ func (s *State) UpdatePresence(userID string, opts ...UserPresenceOption) {
 		opt(&original)
 	}
 
-	log.Println("PRESENCE UPDATE", original)
-
 	s.userPresenceMap[userID] = original
 }
 
