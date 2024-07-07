@@ -186,3 +186,82 @@ loop:
 		t.Error("Expected message to not have error response")
 	}
 }
+
+func TestTrackGameUsage(t *testing.T) {
+	channelID := GenerateRandomID(10)
+	userID := GenerateRandomID(10)
+	interaction := &discordgo.InteractionCreate{
+		Interaction: &discordgo.Interaction{
+			Type:      discordgo.InteractionApplicationCommand,
+			ChannelID: channelID,
+			Member: &discordgo.Member{
+				User: &discordgo.User{
+					ID: userID,
+				},
+			},
+			Data: discordgo.ApplicationCommandInteractionData{
+				Name: skippy.TRACK_GAME_USEAGE,
+				Options: []*discordgo.ApplicationCommandInteractionDataOption{
+					{
+						Type:  discordgo.ApplicationCommandOptionBoolean,
+						Name:  skippy.ENABLE,
+						Value: true,
+					},
+					{
+						Type:  discordgo.ApplicationCommandOptionNumber,
+						Name:  skippy.DAILY_LIMIT,
+						Value: 1.5,
+					},
+					{
+						Type:  discordgo.ApplicationCommandOptionChannel,
+						Name:  skippy.CHANNEL,
+						Value: channelID,
+					},
+				},
+			},
+		},
+	}
+	skippy.OnCommand(dg, interaction, client, state, db, config)
+
+	userConfig, exists := config.UserConfigMap[userID]
+	if !exists {
+		t.Fatal("Expected user config to exists")
+	}
+
+	if !userConfig.Remind {
+		t.Error("Exepected remind to be on")
+	}
+	duration := time.Duration(float64(time.Hour) * 1.5)
+	if userConfig.DailyLimit != duration {
+		t.Error("Exepected duration to match")
+	}
+	if userConfig.LimitReminderChannelID != channelID {
+		t.Error("Expected channel id to be set")
+	}
+	interaction = &discordgo.InteractionCreate{
+		Interaction: &discordgo.Interaction{
+			Type:      discordgo.InteractionApplicationCommand,
+			ChannelID: channelID,
+			Member: &discordgo.Member{
+				User: &discordgo.User{
+					ID: userID,
+				},
+			},
+			Data: discordgo.ApplicationCommandInteractionData{
+				Name: skippy.TRACK_GAME_USEAGE,
+				Options: []*discordgo.ApplicationCommandInteractionDataOption{
+					{
+						Type:  discordgo.ApplicationCommandOptionBoolean,
+						Name:  skippy.ENABLE,
+						Value: false,
+					},
+				},
+			},
+		},
+	}
+	skippy.OnCommand(dg, interaction, client, state, db, config)
+
+	if _, exists = config.UserConfigMap[userID]; exists {
+		t.Error("Expected user config to not exist")
+	}
+}

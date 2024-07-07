@@ -142,6 +142,7 @@ func setup() (
 
 	userConfigMap := make(map[string]skippy.UserConfig)
 	userConfigMap[USER_ID] = skippy.UserConfig{
+		Remind:      true,
 		DailyLimit:  1 * time.Second,
 		WeeklyLimit: 1 * time.Second,
 	}
