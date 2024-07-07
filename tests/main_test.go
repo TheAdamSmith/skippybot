@@ -7,10 +7,11 @@ import (
 	"log"
 	"math/rand"
 	"os"
-	"skippybot/skippy"
 	"strings"
 	"testing"
 	"time"
+
+	"skippybot/skippy"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"

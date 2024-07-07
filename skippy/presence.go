@@ -135,13 +135,14 @@ func pollPresenceStatus(
 				aiGameSessions = append(aiGameSessions, GameSessionAI{
 					Game:       presence.Game,
 					StartedAt:  presence.TimeStarted,
-					TimePlayed: time.Now().Sub(presence.TimeStarted).String(),
+					TimePlayed: time.Since(presence.TimeStarted).String(),
 				})
 			}
 
 			content := ""
-			if aiGameSessions == nil {
-				content = "Please respond saying that there were no games found for this user"
+			if aiGameSessions == nil || len(aiGameSessions) == 0 {
+				log.Println("found user over limit without any game sessions. continuing")
+				continue
 			} else {
 				jsonData, err := json.Marshal(aiGameSessions)
 				if err != nil {

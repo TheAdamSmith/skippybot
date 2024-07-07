@@ -188,11 +188,11 @@ func onCommand(
 	case TRACK_GAME_USEAGE:
 		toggleGameTracking(dg, i, config)
 	case SEND_MESSAGE:
-		if err := sendChannelMessage(dg, i, client, state, config); err != nil {
+		if err := sendChannelMessage(dg, i, client, state); err != nil {
 			handleSlashCommandError(dg, i, err)
 		}
 	case GAME_STATS:
-		if err := generateGameStats(dg, i, client, state, db, config); err != nil {
+		if err := generateGameStats(dg, i, client, state, db); err != nil {
 			handleSlashCommandError(dg, i, err)
 		}
 	default:
@@ -236,7 +236,6 @@ func generateGameStats(
 	client *openai.Client,
 	state *State,
 	db Database,
-	config *Config,
 ) error {
 	daysAgo := 0
 	optionValue, exists := findCommandOption(
@@ -379,7 +378,6 @@ func sendChannelMessage(
 	i *discordgo.InteractionCreate,
 	client *openai.Client,
 	state *State,
-	config *Config,
 ) error {
 	optionValue, exists := findCommandOption(
 		i.ApplicationCommandData().Options,

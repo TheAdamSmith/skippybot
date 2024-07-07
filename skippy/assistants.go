@@ -393,11 +393,11 @@ func setReminder(
 		channelID,
 		duration,
 	)
+
 	scheduler.AddReminderJob(
 		channelID,
 		duration,
 		func() {
-			log.Println("scheduled reminder!")
 			sendChunkedChannelMessage(dg, channelID, channelMsg.Message)
 			state.SetAwaitsResponse(channelID, true, client)
 			for _, duration := range config.ReminderDurations {

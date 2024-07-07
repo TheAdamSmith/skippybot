@@ -188,7 +188,9 @@ loop:
 }
 
 func TestTrackGameUsage(t *testing.T) {
+	t.Parallel()
 	channelID := GenerateRandomID(10)
+	// user different user ID than the rest of the tests to avoid conflict
 	userID := GenerateRandomID(10)
 	interaction := &discordgo.InteractionCreate{
 		Interaction: &discordgo.Interaction{

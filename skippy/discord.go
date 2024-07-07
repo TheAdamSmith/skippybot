@@ -16,6 +16,7 @@ import (
 const (
 	ERROR_RESPONSE   = "Oh no! Something went wrong."
 	EVERYONE_MENTION = "@everyone"
+	POLL_INTERVAL    = 1 * time.Minute
 )
 
 func RunDiscord(
@@ -55,7 +56,7 @@ func RunDiscord(
 
 	dg := NewDiscordBot(session)
 
-	scheduler.AddDurationJob(15*time.Second, func() {
+	scheduler.AddDurationJob(POLL_INTERVAL, func() {
 		pollPresenceStatus(context.Background(), dg, client, state, db, config)
 	})
 
@@ -197,7 +198,7 @@ func messageCreate(
 }
 
 // Gets response from ai disables functions calls.
-// Only able of getting and sending a response
+// Only capable of getting and sending a response
 func getAndSendResponseWithoutTools(
 	ctx context.Context,
 	dg DiscordSession,
@@ -239,7 +240,6 @@ func getAndSendResponseWithoutTools(
 
 	err = sendChunkedChannelMessage(dg, dgChannID, response)
 	return err
-
 }
 
 func getAndSendResponse(
