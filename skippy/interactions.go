@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	openai "github.com/sashabaranov/go-openai"
 
@@ -13,15 +14,18 @@ import (
 )
 
 const (
-	RL_SESH        = "rl_sesh"
-	ALWAYS_RESPOND = "always_respond"
-	SEND_MESSAGE   = "send_message"
-	GAME_STATS     = "game_stats"
-	CHANNEL        = "channel"
-	MESSAGE        = "message"
-	MENTION        = "mention"
-	DAYS           = "days"
-	START_OR_STOP  = "startorstop"
+	RL_SESH           = "rl_sesh"
+	ALWAYS_RESPOND    = "always_respond"
+	SEND_MESSAGE      = "send_message"
+	GAME_STATS        = "game_stats"
+	TRACK_GAME_USEAGE = "track_game_usage"
+	CHANNEL           = "channel"
+	MESSAGE           = "message"
+	MENTION           = "mention"
+	ENABLE            = "enable"
+	DAILY_LIMIT       = "daily_limit"
+	DAYS              = "days"
+	START_OR_STOP     = "startorstop"
 )
 
 func initSlashCommands(
@@ -29,6 +33,41 @@ func initSlashCommands(
 ) ([]*discordgo.ApplicationCommand, error) {
 	var commands []*discordgo.ApplicationCommand
 	command := discordgo.ApplicationCommand{
+		Name:        TRACK_GAME_USEAGE,
+		Description: "enable game tracking.",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionBoolean,
+				Name:        ENABLE,
+				Description: "enable/disable game tracking",
+				Required:    true,
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionNumber,
+				Name:        DAILY_LIMIT,
+				Description: "Daily game limit in hours. Defaults to no limit",
+				Required:    false,
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionChannel,
+				Name:        CHANNEL,
+				Description: "Channel to send the reminder on. Defaults to a DM",
+				Required:    false,
+			},
+		},
+	}
+
+	applicationCommand, err := dg.ApplicationCommandCreate(
+		dg.State.User.ID,
+		"",
+		&command,
+	)
+	if err != nil {
+		log.Println("error creating application command: ", err)
+	}
+	commands = append(commands, applicationCommand)
+
+	command = discordgo.ApplicationCommand{
 		Name:        SEND_MESSAGE,
 		Description: "Have the bot send a message",
 		Options: []*discordgo.ApplicationCommandOption{
@@ -53,7 +92,7 @@ func initSlashCommands(
 		},
 	}
 
-	applicationCommand, err := dg.ApplicationCommandCreate(
+	applicationCommand, err = dg.ApplicationCommandCreate(
 		dg.State.User.ID,
 		"",
 		&command,
@@ -87,7 +126,7 @@ func initSlashCommands(
 			{
 				Type:        discordgo.ApplicationCommandOptionInteger,
 				Name:        DAYS,
-				Description: "Number of days to get stats for. Defaults to 7 ",
+				Description: "Number of days to get stats for. Defaults to today.",
 				Required:    false,
 			},
 		},
@@ -146,12 +185,14 @@ func onCommand(
 	case ALWAYS_RESPOND:
 		// should not error
 		handleAlwaysRespond(dg, i, client, state)
+	case TRACK_GAME_USEAGE:
+		toggleGameTracking(dg, i, config)
 	case SEND_MESSAGE:
-		if err := sendChannelMessage(dg, i, client, state, config); err != nil {
+		if err := sendChannelMessage(dg, i, client, state); err != nil {
 			handleSlashCommandError(dg, i, err)
 		}
 	case GAME_STATS:
-		if err := generateGameStats(dg, i, client, state, db, config); err != nil {
+		if err := generateGameStats(dg, i, client, state, db); err != nil {
 			handleSlashCommandError(dg, i, err)
 		}
 	default:
@@ -195,9 +236,8 @@ func generateGameStats(
 	client *openai.Client,
 	state *State,
 	db Database,
-	config *Config,
 ) error {
-	daysAgo := 7
+	daysAgo := 0
 	optionValue, exists := findCommandOption(
 		i.ApplicationCommandData().Options,
 		DAYS,
@@ -214,7 +254,7 @@ func generateGameStats(
 
 	aiGameSessions := ToGameSessionAI(sessions)
 	content := ""
-	if aiGameSessions == nil {
+	if len(aiGameSessions) == 0 {
 		content = "Please respond saying that there were no games found for this user"
 	} else {
 		jsonData, err := json.Marshal(aiGameSessions)
@@ -245,7 +285,7 @@ func generateGameStats(
 		Content: content,
 	}
 	ctx := context.WithValue(context.Background(), DisableFunctions, true)
-	go getAndSendResponse(
+	go getAndSendResponseWithoutTools(
 		ctx,
 		dg,
 		i.ChannelID,
@@ -253,9 +293,84 @@ func generateGameStats(
 		fmt.Sprintf(GENERATE_GAME_STAT_INSTRUCTIONS, i.Member.Mention()),
 		client,
 		state,
-		config,
 	)
 	return nil
+}
+
+func toggleGameTracking(
+	dg DiscordSession,
+	i *discordgo.InteractionCreate,
+	config *Config,
+) error {
+	var enable bool
+	var remind bool
+	var dailyLimit time.Duration
+	var channelID string
+	optionValue, exists := findCommandOption(
+		i.ApplicationCommandData().Options,
+		ENABLE,
+	)
+	if exists {
+		enable = optionValue.BoolValue()
+	}
+
+	optionValue, exists = findCommandOption(
+		i.ApplicationCommandData().Options,
+		DAILY_LIMIT,
+	)
+	if exists {
+		remind = true
+		dailyLimit = time.Duration(optionValue.FloatValue() * float64(time.Hour))
+	}
+
+	optionValue, exists = findCommandOption(
+		i.ApplicationCommandData().Options,
+		CHANNEL,
+	)
+	if exists {
+		channelID = optionValue.ChannelValue(nil).ID
+	}
+
+	var userID string
+	if i.Member != nil {
+		userID = i.Member.User.ID
+	} else if i.User != nil {
+		userID = i.User.ID
+	} else {
+		return fmt.Errorf("could not get user ID from interaction object")
+	}
+
+	if !enable {
+		delete(config.UserConfigMap, userID)
+		return dg.InteractionRespond(i.Interaction,
+			&discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "Disabled game tracking",
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			})
+	}
+
+	config.UserConfigMap[userID] = UserConfig{
+		Remind:                 remind,
+		DailyLimit:             dailyLimit,
+		LimitReminderChannelID: channelID,
+	}
+	var content string
+	if remind {
+		content = fmt.Sprintf("Enabled tracking with limit of %s", dailyLimit)
+	} else {
+		content = "Enabled tracking with no limit"
+	}
+	return dg.InteractionRespond(i.Interaction,
+		&discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: content,
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
 }
 
 func sendChannelMessage(
@@ -263,7 +378,6 @@ func sendChannelMessage(
 	i *discordgo.InteractionCreate,
 	client *openai.Client,
 	state *State,
-	config *Config,
 ) error {
 	optionValue, exists := findCommandOption(
 		i.ApplicationCommandData().Options,
@@ -323,7 +437,7 @@ func sendChannelMessage(
 	}
 
 	ctx := context.WithValue(context.Background(), DisableFunctions, true)
-	go getAndSendResponse(
+	go getAndSendResponseWithoutTools(
 		ctx,
 		dg,
 		channelID,
@@ -331,7 +445,6 @@ func sendChannelMessage(
 		instructions,
 		client,
 		state,
-		config,
 	)
 
 	err := dg.InteractionRespond(i.Interaction,

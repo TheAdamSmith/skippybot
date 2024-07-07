@@ -9,6 +9,7 @@ import (
 )
 
 // TODO: find better name
+// TODO: add context
 func GetImgUrl(prompt string, client *openai.Client) (string, error) {
 	log.Println("generating image from prompt: ", prompt)
 

@@ -73,7 +73,8 @@ func main() {
 			time.Minute * 90,
 			time.Hour * 3,
 		},
-		OpenAIModel: openai.GPT4o,
+		OpenAIModel:   openai.GPT4o,
+		UserConfigMap: make(map[string]skippy.UserConfig),
 	}
 
 	skippy.RunDiscord(

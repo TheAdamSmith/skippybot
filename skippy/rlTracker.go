@@ -36,6 +36,7 @@ type Game struct {
 	AwayTeam  map[string]PlayerStats `json:"away_team"`
 }
 
+// depreciated
 func StartRocketLeagueSession(
 	ctx context.Context,
 	filePath string,
@@ -66,7 +67,7 @@ func StartRocketLeagueSession(
 					Role:    openai.ChatMessageRoleAssistant,
 					Content: gameInfo,
 				}
-				getAndSendResponse(
+				getAndSendResponseWithoutTools(
 					context.Background(),
 					dg,
 					channelID,
@@ -74,7 +75,6 @@ func StartRocketLeagueSession(
 					COMMENTATE_INSTRUCTIONS,
 					client,
 					state,
-					config,
 				)
 			case <-ctx.Done():
 				log.Println("Received cancel command")

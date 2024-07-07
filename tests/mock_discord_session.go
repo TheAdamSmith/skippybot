@@ -50,6 +50,13 @@ func (m *MockDiscordSession) InteractionRespond(
 	return nil
 }
 
+// returns a channel with USER_ID as the channel.ID
+func (m *MockDiscordSession) UserChannelCreate(userID string, options ...discordgo.RequestOption) (*discordgo.Channel, error) {
+	return &discordgo.Channel{
+		ID: userID,
+	}, nil
+}
+
 func (m *MockDiscordSession) GetState() *discordgo.State {
 	return m.State
 }

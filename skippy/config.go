@@ -12,4 +12,14 @@ type Config struct {
 	// The schedule set for WaitForReminderResponse
 	ReminderDurations []time.Duration
 	OpenAIModel       string
+	DailyGameLimit    time.Duration
+	// discordgo.User.ID -> UserPresenceConfig
+	UserConfigMap map[string]UserConfig
+}
+
+type UserConfig struct {
+	DailyLimit             time.Duration
+	WeeklyLimit            time.Duration
+	Remind                 bool
+	LimitReminderChannelID string
 }

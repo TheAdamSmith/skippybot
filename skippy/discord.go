@@ -14,31 +14,9 @@ import (
 )
 
 const (
-	COMMENTATE_INSTRUCTIONS = `
-	Messages will be sent in this thread that will contain the json results of a rocket league game.
-	Announce the overall score and commentate on the performance of the home team. Come up with creative insults on their performance, but praise high performers
-	`
-
-	DEFAULT_INSTRUCTIONS = `Try to be as helpful as possible while keeping the iconic skippy saracasm in your response.
-	Use responses of varying lengths.
-	`
-
-	MORNING_MESSAGE_INSTRUCTIONS = `
-	You are making creating morning wake up message for the users of a discord server. Make sure to mention @here in your message. 
-	Be creative in the message you create in wishing everyone good morning. If there is weather data included in the message please give a brief overview of the weather for each location.
-	if there is stock price information included in the message include that information in the message.
-	`
-
-	SEND_CHANNEL_MSG_INSTRUCTIONS = `You are generating a message to send in a discord channel. Generate a message based on the prompt.`
-
-	GENERATE_GAME_STAT_INSTRUCTIONS = `You are summarizing a users game sessions. 
-	The message will be a a json formatted list of game sessions. 
-	Please summarise the results of the sessions including total hours played and the most played game.
-	This is the user mention (%s) of the user you are summarizing. Please include it in your message.
-	`
-
 	ERROR_RESPONSE   = "Oh no! Something went wrong."
 	EVERYONE_MENTION = "@everyone"
+	POLL_INTERVAL    = 1 * time.Minute
 )
 
 func RunDiscord(
@@ -51,12 +29,21 @@ func RunDiscord(
 	db Database,
 ) {
 	state := NewState(assistantID, token, stockAPIKey, weatherAPIKey)
+	// TODO: fix
+	state.openAIModel = config.OpenAIModel
+	scheduler, err := NewScheduler()
+	if err != nil {
+		log.Fatal("could not create scheduler", err)
+	}
+	scheduler.Start()
 
 	session, err := discordgo.New("Bot " + token)
 	if err != nil {
 		log.Fatalln("Unable to get discord client")
 	}
+
 	session.Identify.Intents = discordgo.IntentsAll
+
 	err = session.Open()
 	if err != nil {
 		log.Fatalln("Unable to open discord client", err.Error())
@@ -68,8 +55,13 @@ func RunDiscord(
 	session.State.TrackMembers = true
 
 	dg := NewDiscordBot(session)
+
+	scheduler.AddDurationJob(POLL_INTERVAL, func() {
+		pollPresenceStatus(context.Background(), dg, client, state, db, config)
+	})
+
 	session.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
-		messageCreate(dg, m, client, state, config)
+		messageCreate(dg, m, client, state, scheduler, config)
 	})
 
 	session.AddHandler(
@@ -135,6 +127,7 @@ func messageCreate(
 	m *discordgo.MessageCreate,
 	client *openai.Client,
 	state *State,
+	scheduler *Scheduler,
 	config *Config,
 ) {
 	// Ignore all messages created by the bot itself
@@ -159,10 +152,12 @@ func messageCreate(
 			DEFAULT_INSTRUCTIONS,
 			client,
 			state,
+			scheduler,
 			config,
 		)
 		// value used by reminders to see if it needs to send another message to user
 		state.SetAwaitsResponse(m.ChannelID, false, client)
+		scheduler.CancelReminderJob(m.ChannelID)
 	}
 
 	role, roleMentioned := isRoleMentioned(dg, m)
@@ -177,6 +172,7 @@ func messageCreate(
 	message = replaceChannelIDs(message, m.MentionChannels)
 	message += "\n current time: "
 
+	// TODO: put in instructions
 	format := "Monday, Jan 02 at 03:04 PM"
 	message += time.Now().Format(format)
 	message += "\n User ID: " + m.Author.Mention()
@@ -196,8 +192,54 @@ func messageCreate(
 		DEFAULT_INSTRUCTIONS,
 		client,
 		state,
+		scheduler,
 		config,
 	)
+}
+
+// Gets response from ai disables functions calls.
+// Only capable of getting and sending a response
+func getAndSendResponseWithoutTools(
+	ctx context.Context,
+	dg DiscordSession,
+	dgChannID string,
+	messageReq openai.MessageRequest,
+	additionalInstructions string,
+	client *openai.Client,
+	state *State,
+) error {
+	dg.ChannelTyping(dgChannID)
+
+	log.Printf("Using message: %s\n", messageReq.Content)
+
+	log.Println("Attempting to get response...")
+
+	thread := state.GetOrCreateThread(dgChannID, client)
+	// lock the thread because we can't queue additional messages during a run
+	state.LockThread(dgChannID)
+	defer state.UnLockThread(dgChannID)
+
+	response, err := GetResponse(
+		ctx,
+		dg,
+		thread.openAIThread.ID,
+		dgChannID,
+		messageReq,
+		additionalInstructions,
+		true,
+		client,
+		state,
+		// TODO: find a better way to pass this optionally
+		nil,
+		nil,
+	)
+	if err != nil {
+		log.Println("Unable to get response: ", err)
+		response = ERROR_RESPONSE
+	}
+
+	err = sendChunkedChannelMessage(dg, dgChannID, response)
+	return err
 }
 
 func getAndSendResponse(
@@ -208,6 +250,7 @@ func getAndSendResponse(
 	additionalInstructions string,
 	client *openai.Client,
 	state *State,
+	scheduler *Scheduler,
 	config *Config,
 ) error {
 	dg.ChannelTyping(dgChannID)
@@ -228,8 +271,10 @@ func getAndSendResponse(
 		dgChannID,
 		messageReq,
 		additionalInstructions,
+		false,
 		client,
 		state,
+		scheduler,
 		config,
 	)
 	if err != nil {
@@ -239,87 +284,4 @@ func getAndSendResponse(
 
 	err = sendChunkedChannelMessage(dg, dgChannID, response)
 	return err
-}
-
-func onPresenceUpdateDebounce(
-	dg DiscordSession,
-	p *discordgo.PresenceUpdate,
-	s *State,
-	db Database,
-	debouncer *Debouncer,
-	config *Config,
-) {
-	debouncer.Debounce(p.User.ID, func() {
-		onPresenceUpdate(dg, p, s, db, config)
-	})
-}
-
-func onPresenceUpdate(
-	dg DiscordSession,
-	p *discordgo.PresenceUpdate,
-	s *State,
-	db Database,
-	config *Config,
-) {
-	game, isPlayingGame := getCurrentGame(p)
-	isPlayingGame = isPlayingGame && game != ""
-
-	userPresence, exists := s.GetPresence(p.User.ID)
-
-	member, err := dg.GetState().Member(p.GuildID, p.User.ID)
-	if err != nil {
-		log.Println("Could not get user: ", err)
-		return
-	}
-
-	startedPlaying := isPlayingGame &&
-		(!exists || exists && !userPresence.IsPlayingGame)
-	stoppedPlaying := exists && userPresence.IsPlayingGame && !isPlayingGame
-
-	if startedPlaying {
-		log.Printf("User %s started playing %s\n", member.User.Username, game)
-		s.UpdatePresence(p.User.ID, p.Status, isPlayingGame, game, time.Now())
-	}
-
-	if stoppedPlaying {
-
-		duration := time.Since(userPresence.TimeStarted)
-
-		log.Printf(
-			"User %s stopped playing game %s, after %s\n",
-			member.User.Username,
-			userPresence.Game,
-			duration,
-		)
-
-		// this state update must be done before the db call to avoid race conditions
-		// later me: probably not required cuz debounced now
-		s.UpdatePresence(p.User.ID, p.Status, isPlayingGame, "", time.Time{})
-
-		if duration < config.MinGameSessionDuration {
-			return
-		}
-
-		userSession := &GameSession{
-			UserID:    p.User.ID,
-			Game:      userPresence.Game,
-			StartedAt: userPresence.TimeStarted,
-			Duration:  duration,
-		}
-
-		err = db.CreateGameSession(userSession)
-		if err != nil {
-			log.Println("Unable to create game session: ", err)
-		}
-
-	}
-}
-
-func getCurrentGame(p *discordgo.PresenceUpdate) (string, bool) {
-	for _, activity := range p.Activities {
-		if activity.Type == discordgo.ActivityTypeGame {
-			return activity.Name, true
-		}
-	}
-	return "", false
 }

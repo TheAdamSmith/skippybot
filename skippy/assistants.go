@@ -54,6 +54,12 @@ type ReminderFuncArgs struct {
 	UserID      string `json:"user_id,omitempty"`
 }
 
+// Gets a response from the ai.
+//
+// Sends message to thread, generates and executes a run.
+//
+// scheduler and config are nullable when disableFunctions is true.
+// Will handle functions calls otherwise
 func GetResponse(
 	ctx context.Context,
 	dg DiscordSession,
@@ -61,17 +67,15 @@ func GetResponse(
 	dgChannID string,
 	messageReq openai.MessageRequest,
 	additionalInstructions string,
+	disableFunctions bool,
 	client *openai.Client,
 	state *State,
+	// nullable if disableFunctions is true
+	scheduler *Scheduler,
+	// nullable if disableFunctions is true
 	config *Config,
 ) (string, error) {
 	assistantID := state.GetAssistantID()
-
-	// TODO: this should be a param
-	disableFunctions, ok := ctx.Value(DisableFunctions).(bool)
-	if !ok {
-		disableFunctions = false
-	}
 
 	_, err := client.CreateMessage(ctx, threadID, messageReq)
 	if err != nil {
@@ -82,7 +86,7 @@ func GetResponse(
 	runReq := openai.RunRequest{
 		AssistantID:            assistantID,
 		AdditionalInstructions: additionalInstructions,
-		Model:                  config.OpenAIModel,
+		Model:                  state.openAIModel,
 	}
 
 	if disableFunctions {
@@ -134,11 +138,14 @@ func GetResponse(
 			if err != nil {
 				return "", fmt.Errorf("unable to get first message: %s", err)
 			}
-			log.Println("Received response from ai: ", message)
+			log.Println("Received response from ai.")
 			return message, nil
 
 		case openai.RunStatusRequiresAction:
-			run, err = handleRequiresAction(dg, run, dgChannID, threadID, client, state, config)
+			if disableFunctions || config == nil || scheduler == nil {
+				return "", fmt.Errorf("recieved required action when tools disabled")
+			}
+			run, err = handleRequiresAction(ctx, dg, run, dgChannID, threadID, client, state, scheduler, config)
 			if err != nil {
 				return "", err
 			}
@@ -154,12 +161,14 @@ func GetResponse(
 }
 
 func handleRequiresAction(
+	ctx context.Context,
 	dg DiscordSession,
 	run openai.Run,
 	dgChannID string,
 	threadID string,
 	client *openai.Client,
 	state *State,
+	scheduler *Scheduler,
 	config *Config,
 ) (openai.Run, error) {
 	funcArgs := GetFunctionArgs(run)
@@ -172,7 +181,15 @@ outerloop:
 		switch funcName := funcArg.FuncName; funcName {
 		case ToggleMorningMessage:
 			log.Println("toggle_morning_message()")
-			output, err := handleMorningMessage(dg, funcArg, dgChannID, client, state, config)
+			output, err := handleMorningMessage(
+				ctx,
+				dg,
+				funcArg,
+				dgChannID,
+				client,
+				state,
+				scheduler,
+			)
 			if err != nil {
 				log.Println("error handling morning message: ", err)
 			}
@@ -183,7 +200,7 @@ outerloop:
 		case GetStockPriceKey:
 			log.Println("get_stock_price()")
 
-			output, err := handleGetStockPrice(dg, funcArg, client, state)
+			output, err := handleGetStockPrice(funcArg, state)
 			if err != nil {
 				log.Println("error handling get_stock_price: ", err)
 			}
@@ -196,7 +213,7 @@ outerloop:
 		case GetWeatherKey:
 			log.Println(GetWeatherKey)
 
-			output, err := handleGetWeather(dg, funcArg, client, state)
+			output, err := handleGetWeather(funcArg, state)
 			if err != nil {
 				log.Println("error handling get_stock_price: ", err)
 			}
@@ -213,7 +230,6 @@ outerloop:
 				funcArg,
 				dgChannID,
 				client,
-				state,
 			)
 			if err != nil {
 				log.Println("unable to get image: ", err)
@@ -224,7 +240,16 @@ outerloop:
 			)
 		case SetReminder:
 			log.Println("set_reminder()")
-			output, err := setReminder(context.Background(), dg, funcArg, dgChannID, client, state, config)
+			output, err := setReminder(
+				context.Background(),
+				dg,
+				funcArg,
+				dgChannID,
+				client,
+				state,
+				scheduler,
+				config,
+			)
 			if err != nil {
 				log.Println("error sending channel message: ", err)
 			}
@@ -246,9 +271,7 @@ outerloop:
 }
 
 func handleGetWeather(
-	dg DiscordSession,
 	funcArg FuncArgs,
-	client *openai.Client,
 	state *State,
 ) (string, error) {
 	weatherFuncArgs := WeatherFuncArgs{}
@@ -270,9 +293,7 @@ func handleGetWeather(
 }
 
 func handleGetStockPrice(
-	dg DiscordSession,
 	funcArg FuncArgs,
-	client *openai.Client,
 	state *State,
 ) (string, error) {
 	stockFuncArgs := StockFuncArgs{}
@@ -294,12 +315,13 @@ func handleGetStockPrice(
 }
 
 func handleMorningMessage(
+	ctx context.Context,
 	dg DiscordSession,
 	funcArg FuncArgs,
 	dgChannID string,
 	client *openai.Client,
 	state *State,
-	config *Config,
+	scheduler *Scheduler,
 ) (string, error) {
 	morningMsgFuncArgs := MorningMsgFuncArgs{}
 	err := json.Unmarshal([]byte(funcArg.JsonValue), &morningMsgFuncArgs)
@@ -309,12 +331,13 @@ func handleMorningMessage(
 	}
 
 	output := toggleMorningMsg(
+		ctx,
 		dg,
 		morningMsgFuncArgs,
 		dgChannID,
 		client,
 		state,
-		config,
+		scheduler,
 	)
 
 	return output, nil
@@ -326,7 +349,6 @@ func getAndSendImage(
 	funcArg FuncArgs,
 	channelID string,
 	client *openai.Client,
-	state *State,
 ) (string, error) {
 	generateImageFuncArgs := GenerateImageFuncArgs{}
 	err := json.Unmarshal([]byte(funcArg.JsonValue), &generateImageFuncArgs)
@@ -353,6 +375,7 @@ func setReminder(
 	channelID string,
 	client *openai.Client,
 	state *State,
+	scheduler *Scheduler,
 	config *Config,
 ) (string, error) {
 	var channelMsg ReminderFuncArgs
@@ -371,79 +394,65 @@ func setReminder(
 		duration,
 	)
 
-	time.AfterFunc(
+	scheduler.AddReminderJob(
+		channelID,
 		duration,
 		func() {
 			sendChunkedChannelMessage(dg, channelID, channelMsg.Message)
 			state.SetAwaitsResponse(channelID, true, client)
-
-			go waitForReminderResponse(
-				dg,
-				channelID,
-				channelMsg.UserID,
-				client,
-				state,
-				config,
-			)
+			for _, duration := range config.ReminderDurations {
+				scheduler.AddReminderJob(channelID, duration, func() {
+					sendAdditionalReminder(
+						ctx,
+						dg,
+						channelID,
+						channelMsg.UserID,
+						client,
+						state,
+					)
+				})
+			}
 		},
 	)
 
 	return "worked", nil
 }
 
-func waitForReminderResponse(
+func sendAdditionalReminder(
+	ctx context.Context,
 	dg DiscordSession,
 	channelID string,
 	userID string,
 	client *openai.Client,
 	state *State,
-	config *Config,
 ) {
-	timer := time.NewTimer(0)
-	for i := 0; i < len(config.ReminderDurations); i++ {
-		timer.Reset(config.ReminderDurations[i])
-		<-timer.C
+	log.Println("sending another reminder")
 
-		thread, exists := state.GetThread(channelID)
-		if !exists {
-			return
-		}
-
-		// this value is reset on messageCreate
-		if !thread.awaitsResponse {
-			timer.Stop()
-			return
-		}
-
-		log.Println("sending another reminder")
-
-		// TODO: they should not get mentioned
-		if userID == "" {
-			userID = "they"
-		}
-
-		// TODO: maybe add this to additional_instruction
-		message := fmt.Sprintf(
-			"It looks %s haven't responsed to this reminder can you generate a response nagging them about it. This is not a tool request.",
-			UserMention(userID),
-		)
-
-		messageReq := openai.MessageRequest{
-			Role:    openai.ChatMessageRoleAssistant,
-			Content: message,
-		}
-
-		getAndSendResponse(
-			context.Background(),
-			dg,
-			channelID,
-			messageReq,
-			DEFAULT_INSTRUCTIONS,
-			client,
-			state,
-			config,
-		)
+	// TODO: they should not get mentioned
+	if userID == "" {
+		userID = "they"
 	}
+
+	// TODO: maybe add this to additional_instruction
+	message := fmt.Sprintf(
+		"It looks %s haven't responsed to this reminder can you generate a response nagging them about it. This is not a tool request.",
+		UserMention(userID),
+	)
+
+	messageReq := openai.MessageRequest{
+		Role:    openai.ChatMessageRoleAssistant,
+		Content: message,
+	}
+
+	getAndSendResponseWithoutTools(
+		ctx,
+		dg,
+		channelID,
+		messageReq,
+		DEFAULT_INSTRUCTIONS,
+		client,
+		state,
+	)
 }
 
 func UserMention(userID string) string {
@@ -454,31 +463,21 @@ func UserMention(userID string) string {
 }
 
 func toggleMorningMsg(
+	ctx context.Context,
 	dg DiscordSession,
 	morningMsgFuncArgs MorningMsgFuncArgs,
 	channelID string,
 	client *openai.Client,
 	state *State,
-	config *Config,
+	scheduler *Scheduler,
 ) string {
 	if !morningMsgFuncArgs.Enable {
-		thread, exists := state.GetThread(channelID)
-		if !exists {
-			log.Println("attempted to cancel morning message of thread that does not exist")
-			return "nothing to cancel"
-		}
-		cancel := thread.cancelFunc
-		if cancel == nil {
-			log.Println("cancel function does not exist returning")
-			return "nothing to cancel"
-		}
-		cancel()
-		log.Println("canceled morning message")
+		scheduler.CancelMorningMsgJob(channelID)
 		return "worked"
 	}
 
 	// TODO: this is hacky
-	// this should be fixed in the ai funciton definition
+	// this should be fixed in the ai function definition
 	timeFmt := "15:04"
 	log.Println("Given time is: ", morningMsgFuncArgs.Time)
 	givenTime, err := time.Parse(timeFmt, morningMsgFuncArgs.Time)
@@ -493,117 +492,68 @@ func toggleMorningMsg(
 
 	}
 
-	now := time.Now()
-	givenTime = time.Date(
-		now.Year(),
-		now.Month(),
-		now.Day(),
-		givenTime.Hour(),
-		givenTime.Minute(),
-		0,
-		0,
-		now.Location(),
-	)
-
-	if givenTime.Before(now) {
-		givenTime = givenTime.Add(24 * time.Hour)
+	if scheduler.HasMorningMsgJob(channelID) {
+		scheduler.CancelMorningMsgJob(channelID)
 	}
 
-	duration := givenTime.Sub(now)
-	log.Println("sending morning message in: ", duration)
-	ctx, cancel := context.WithCancel(context.Background())
-	state.AddCancelFunc(channelID, cancel, client)
-	go startMorningMessageLoop(
-		ctx,
-		dg,
-		morningMsgFuncArgs,
-		duration,
+	log.Println("Setting the Morning Msg for: ", givenTime)
+	scheduler.AddMorningMsgJob(
 		channelID,
-		client,
-		state,
-		config)
+		givenTime,
+		func() {
+			sendMorningMsg(ctx, dg, morningMsgFuncArgs, channelID, client, state)
+		},
+	)
 
 	return "worked"
 }
 
-// TODO: group all timer calls into a common scheduler
-func startMorningMessageLoop(
+func sendMorningMsg(
 	ctx context.Context,
 	dg DiscordSession,
 	morningMsgFuncArgs MorningMsgFuncArgs,
-	duration time.Duration,
 	channelID string,
 	client *openai.Client,
 	state *State,
-	config *Config,
 ) {
-	ticker := time.NewTicker(duration)
-
-	for {
-		select {
-		case <-ctx.Done():
-
-			if err := ctx.Err(); err != nil {
-				log.Println("context canceled with error: ", err)
-				ticker.Stop()
-				return
-
-			} else {
-				log.Println("Context canceled. Stopping morning message")
-				return
-			}
-
-		case <-ticker.C:
-
-			log.Println("ticker expired sending morning message ...")
-
-			message := "Please tell everyone @here good morning."
-			for _, location := range morningMsgFuncArgs.WeatherLocations {
-				weather, err := getWeather(location, state.GetWeatherAPIKey())
-				if err != nil {
-					log.Printf("unable to get weather for %s: %s\n", location, err)
-					continue
-				}
-				message += location + ":" + weather
-			}
-
-			for _, stock := range morningMsgFuncArgs.Stocks {
-				stockPrice, err := getStockPrice(stock, state.GetStockAPIKey())
-				if err != nil {
-					log.Printf("unable to get weather for %s: %s\n", stock, err)
-					continue
-				}
-				message += stock + ":" + stockPrice
-			}
-
-			log.Println("getting morning message with prompt: ", message)
-
-			messageReq := openai.MessageRequest{
-				Role:    openai.ChatMessageRoleAssistant,
-				Content: message,
-			}
-			ctx = context.WithValue(ctx, DisableFunctions, true)
-
-			// reset the thread every morning
-			state.ResetOpenAIThread(channelID, client)
-
-			getAndSendResponse(
-				ctx,
-				dg,
-				channelID,
-				messageReq,
-				MORNING_MESSAGE_INSTRUCTIONS,
-				client,
-				state,
-				config,
-			)
-
-			if duration != 24*time.Hour {
-				duration = 24 * time.Hour
-				ticker.Reset(duration)
-			}
+	message := "Please tell everyone @here good morning."
+	for _, location := range morningMsgFuncArgs.WeatherLocations {
+		weather, err := getWeather(location, state.GetWeatherAPIKey())
+		if err != nil {
+			log.Printf("unable to get weather for %s: %s\n", location, err)
+			continue
 		}
+		message += location + ":" + weather
 	}
+
+	for _, stock := range morningMsgFuncArgs.Stocks {
+		stockPrice, err := getStockPrice(stock, state.GetStockAPIKey())
+		if err != nil {
+			log.Printf("unable to get weather for %s: %s\n", stock, err)
+			continue
+		}
+		message += stock + ":" + stockPrice
+	}
+
+	log.Println("getting morning message with prompt: ", message)
+
+	messageReq := openai.MessageRequest{
+		Role:    openai.ChatMessageRoleAssistant,
+		Content: message,
+	}
+
+	// reset the thread every morning
+	state.ResetOpenAIThread(channelID, client)
+
+	getAndSendResponseWithoutTools(
+		ctx,
+		dg,
+		channelID,
+		messageReq,
+		MORNING_MESSAGE_INSTRUCTIONS,
+		client,
+		state,
+	)
 }
 
 func submitToolOutputs(
