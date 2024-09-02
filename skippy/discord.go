@@ -2,6 +2,7 @@ package skippy
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -130,16 +131,17 @@ func messageCreate(
 	scheduler *Scheduler,
 	config *Config,
 ) {
+
+	log.Printf("Recieved Message: %s\n", m.Content)
+
+	thread, threadExists := state.GetThread(m.ChannelID)
+
 	// Ignore all messages created by the bot itself
 	if m.Author.ID == dg.GetState().User.ID {
 		return
 	}
 
-	log.Printf("Recieved Message: %s\n", m.Content)
-
-	thread := state.GetOrCreateThread(m.ChannelID, client)
-
-	if thread.awaitsResponse {
+	if threadExists && thread.awaitsResponse {
 		messageReq := openai.MessageRequest{
 			Role:    openai.ChatMessageRoleUser,
 			Content: m.Content,
@@ -163,7 +165,8 @@ func messageCreate(
 	role, roleMentioned := isRoleMentioned(dg, m)
 
 	isMentioned := isMentioned(m.Mentions, dg.GetState().User) || roleMentioned
-	if !isMentioned && !thread.alwaysRespond {
+	alwaysRespond := threadExists && thread.alwaysRespond
+	if !isMentioned && !alwaysRespond {
 		return
 	}
 
@@ -214,7 +217,10 @@ func getAndSendResponseWithoutTools(
 
 	log.Println("Attempting to get response...")
 
-	thread := state.GetOrCreateThread(dgChannID, client)
+	thread, err := state.GetOrCreateThread(dgChannID, client)
+	if err != nil {
+		return fmt.Errorf("getAndSendResponseWithoutTools failed with channelID %s %w", dgChannID, err)
+	}
 	// lock the thread because we can't queue additional messages during a run
 	state.LockThread(dgChannID)
 	defer state.UnLockThread(dgChannID)
@@ -259,7 +265,10 @@ func getAndSendResponse(
 
 	log.Println("Attempting to get response...")
 
-	thread := state.GetOrCreateThread(dgChannID, client)
+	thread, err := state.GetOrCreateThread(dgChannID, client)
+	if err != nil {
+		return fmt.Errorf("getAndSendResponse failed with channelID %s %w", dgChannID, err)
+	}
 	// lock the thread because we can't queue additional messages during a run
 	state.LockThread(dgChannID)
 	defer state.UnLockThread(dgChannID)

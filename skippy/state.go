@@ -2,6 +2,7 @@ package skippy
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 
@@ -58,23 +59,25 @@ func (s *State) GetThread(threadID string) (*ChatThread, bool) {
 	return thread, exists
 }
 
-// TODO: should return error
-func (s *State) GetOrCreateThread(threadID string, client *openai.Client) *ChatThread {
+func (s *State) GetOrCreateThread(threadID string, client *openai.Client) (*ChatThread, error) {
 	s.mu.RLock()
 	thread, exists := s.threadMap[threadID]
 	if exists {
 		s.mu.RUnlock()
-		return thread
+		return thread, nil
 	}
 
 	s.mu.RUnlock()
-	s.ResetOpenAIThread(threadID, client)
+	err := s.ResetOpenAIThread(threadID, client)
+	if err != nil {
+		return nil, fmt.Errorf("GetOrCreateThread failed with threadID %s %w", threadID, err)
+	}
 
 	s.mu.RLock()
 	thread = s.threadMap[threadID]
 	s.mu.RUnlock()
 
-	return thread
+	return thread, nil
 }
 
 func (s *State) SetThread(threadID string, thread *ChatThread) {

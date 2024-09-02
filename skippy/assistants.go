@@ -127,6 +127,7 @@ func GetResponse(
 			log.Println(errorMsg)
 			return "", fmt.Errorf(errorMsg)
 		case openai.RunStatusCompleted:
+			log.Println("Usage: ", run.Usage.TotalTokens)
 			messageList, err := client.ListMessage(ctx, threadID, nil, nil, nil, nil)
 			if err != nil {
 				return "", fmt.Errorf("unable to get messages: %s", err)
