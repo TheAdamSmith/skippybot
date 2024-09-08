@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -67,8 +68,26 @@ func RunDiscord(
 
 	session.AddHandler(
 		func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-			if i.Type == discordgo.InteractionApplicationCommand {
+			switch i.Type {
+			case discordgo.InteractionApplicationCommand:
 				onCommand(dg, i, client, state, db, config)
+			case discordgo.InteractionMessageComponent:
+				// Only respond with default reponse. Individual components will manage their own handlers
+				go func() {
+					// InteractonResponse timeout is 3 seconds
+					// sleep to let other handlers respond first
+					time.Sleep(2500 * time.Millisecond)
+					if err := dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Content: "This interaction has completed",
+							Flags:   discordgo.MessageFlagsEphemeral,
+						},
+					},
+					); err != nil && !strings.Contains(err.Error(), "Interaction has already been acknowledged.") {
+						log.Println("Error sending response", err)
+					}
+				}()
 			}
 		},
 	)
@@ -131,7 +150,6 @@ func messageCreate(
 	scheduler *Scheduler,
 	config *Config,
 ) {
-
 	log.Printf("Recieved Message: %s\n", m.Content)
 
 	thread, threadExists := state.GetThread(m.ChannelID)

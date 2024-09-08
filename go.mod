@@ -3,7 +3,8 @@ module skippybot
 go 1.18
 
 require (
-	github.com/bwmarrin/discordgo v0.27.1
+	github.com/bwmarrin/discordgo v0.28.1
+	github.com/go-co-op/gocron/v2 v2.7.1
 	github.com/joho/godotenv v1.5.1
 	github.com/sashabaranov/go-openai v1.24.0
 	gorm.io/driver/sqlite v1.5.6
@@ -11,7 +12,6 @@ require (
 )
 
 require (
-	github.com/go-co-op/gocron/v2 v2.7.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
