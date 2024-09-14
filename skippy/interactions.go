@@ -161,7 +161,7 @@ func onCommand(
 			handleSlashCommandError(dg, i, err)
 		}
 	case WHENS_GOOD:
-		if err := handleWhensGood(dg, i, client, state); err != nil {
+		if err := handleWhensGood(dg, i); err != nil {
 			handleSlashCommandError(dg, i, err)
 		}
 	default:
@@ -207,11 +207,11 @@ func generateGameStats(
 	db Database,
 ) error {
 	daysAgo := 0
-	optionValue, exists := findCommandOption(
+	optionValue, ok := findCommandOption(
 		i.ApplicationCommandData().Options,
 		DAYS,
 	)
-	if exists {
+	if ok {
 		daysAgo = int(optionValue.IntValue())
 	}
 
@@ -275,28 +275,28 @@ func toggleGameTracking(
 	var remind bool
 	var dailyLimit time.Duration
 	var channelID string
-	optionValue, exists := findCommandOption(
+	optionValue, ok := findCommandOption(
 		i.ApplicationCommandData().Options,
 		ENABLE,
 	)
-	if exists {
+	if ok {
 		enable = optionValue.BoolValue()
 	}
 
-	optionValue, exists = findCommandOption(
+	optionValue, ok = findCommandOption(
 		i.ApplicationCommandData().Options,
 		DAILY_LIMIT,
 	)
-	if exists {
+	if ok {
 		remind = true
 		dailyLimit = time.Duration(optionValue.FloatValue() * float64(time.Hour))
 	}
 
-	optionValue, exists = findCommandOption(
+	optionValue, ok = findCommandOption(
 		i.ApplicationCommandData().Options,
 		CHANNEL,
 	)
-	if exists {
+	if ok {
 		channelID = optionValue.ChannelValue(nil).ID
 	}
 
@@ -348,22 +348,22 @@ func sendChannelMessage(
 	client *openai.Client,
 	state *State,
 ) error {
-	optionValue, exists := findCommandOption(
+	optionValue, ok := findCommandOption(
 		i.ApplicationCommandData().Options,
 		CHANNEL,
 	)
-	if !exists {
+	if !ok {
 		return fmt.Errorf("unable to find slash command option %s", CHANNEL)
 	}
 
 	channel := optionValue.ChannelValue(nil)
 	channelID := channel.ID
 
-	optionValue, exists = findCommandOption(
+	optionValue, ok = findCommandOption(
 		i.ApplicationCommandData().Options,
 		MESSAGE,
 	)
-	if !exists {
+	if !ok {
 		return fmt.Errorf("unable to find slash command option %s", MESSAGE)
 	}
 
@@ -372,11 +372,11 @@ func sendChannelMessage(
 	var mentionString string
 
 	// this one is optional
-	optionValue, exists = findCommandOption(
+	optionValue, ok = findCommandOption(
 		i.ApplicationCommandData().Options,
 		MENTION,
 	)
-	if exists {
+	if ok {
 		guild, err := dg.GetState().Guild(i.GuildID)
 		if err != nil {
 			log.Println("Could not get guild", err)
@@ -435,8 +435,6 @@ func sendChannelMessage(
 func handleWhensGood(
 	dg DiscordSession,
 	i *discordgo.InteractionCreate,
-	client *openai.Client,
-	state *State,
 ) error {
 	whensGoodResponse := generateWhensGoodResponse(dg, i)
 
@@ -481,11 +479,11 @@ func handleRLSesh(
 	state *State,
 	config *Config,
 ) error {
-	optionValue, exists := findCommandOption(
+	optionValue, ok := findCommandOption(
 		i.ApplicationCommandData().Options,
 		START_OR_STOP,
 	)
-	if !exists {
+	if !ok {
 		return fmt.Errorf("unable to find slash command option")
 	}
 
@@ -530,8 +528,8 @@ func handleRLSesh(
 	if textOption == "stop" {
 
 		var message string
-		thread, exists := state.GetThread(i.ChannelID)
-		if !exists {
+		thread, ok := state.GetThread(i.ChannelID)
+		if !ok {
 			message = "unable to stop session no thread found"
 		}
 		cancelFunc := thread.cancelFunc

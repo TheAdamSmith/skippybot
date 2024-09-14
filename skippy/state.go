@@ -9,6 +9,7 @@ import (
 	openai "github.com/sashabaranov/go-openai"
 )
 
+// TODO: make channel id type
 type State struct {
 	threadMap       map[string]*ChatThread
 	userPresenceMap map[string]UserPresence
