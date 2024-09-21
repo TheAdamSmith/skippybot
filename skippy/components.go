@@ -153,8 +153,8 @@ func getUserAvailability(
 
 	userAvailability := make(map[string][]time.Time)
 	var removeHandlerFuncs []func()
-	var message *discordgo.Message
 	var err error
+	var message *discordgo.Message
 
 	onSelect := func(i *discordgo.InteractionCreate) {
 		var timeSlots []time.Time
@@ -168,44 +168,10 @@ func getUserAvailability(
 
 		userAvailability[i.Member.User.ID] = timeSlots
 
-		commonTimes := findCommonTimes(userAvailability, 3)
-
-		messageEmbed := &discordgo.MessageEmbed{
-			Fields: getUserAvailabilityFields(userAvailability, commonTimes),
+		message, err = sendUserAvailabilityResponse(dg, i, message, userAvailability)
+		if err != nil {
+			log.Println("error sending user availability response", err)
 		}
-
-		var buttFuncs []components.ButtonFunc
-		for _, t := range commonTimes {
-			if t.IsZero() {
-				continue
-			}
-
-			buttFuncs = append(buttFuncs, components.WithButton(dg, discordgo.Button{
-				Label: fmt.Sprintf("Create event for %s🚀", t.Format("3:04 PM MST")),
-			}, func(i *discordgo.InteractionCreate) {
-			}))
-		}
-
-		buttonRow, removeFuncs := components.ButtonRow(dg, buttFuncs...)
-		removeHandlerFuncs = append(removeHandlerFuncs, removeFuncs...)
-
-		if message == nil {
-			message, err = dg.ChannelMessageSendEmbed(i.ChannelID, messageEmbed)
-			if err != nil {
-				log.Println("error sending embedded message: ", err)
-			}
-
-			return
-		}
-
-		dg.ChannelMessageEditComplex(&discordgo.MessageEdit{
-			Channel: i.ChannelID,
-			ID:      message.ID,
-			Embed:   messageEmbed,
-			Components: &[]discordgo.MessageComponent{
-				buttonRow,
-			},
-		})
 	}
 
 	zero := 0
@@ -218,6 +184,19 @@ func getUserAvailability(
 		}, onSelect)
 	removeHandlerFuncs = append(removeHandlerFuncs, removeFunc)
 
+	buttFunc := components.WithButton(dg, discordgo.Button{
+		Style: discordgo.DangerButton,
+		Label: "Can't",
+	}, func(i *discordgo.InteractionCreate) {
+		userAvailability[i.Member.User.ID] = []time.Time{}
+		message, err = sendUserAvailabilityResponse(dg, i, message, userAvailability)
+		if err != nil {
+			log.Println("error sending user availability response", err)
+		}
+	})
+	buttonRow, removeFuncs := components.ButtonRow(dg, buttFunc)
+	removeHandlerFuncs = append(removeHandlerFuncs, removeFuncs...)
+
 	time.AfterFunc(6*time.Hour, func() {
 		for _, removeFunc := range removeHandlerFuncs {
 			removeFunc()
@@ -227,24 +206,54 @@ func getUserAvailability(
 	dg.ChannelMessageSendComplex(formData.ChannelID, &discordgo.MessageSend{
 		Components: []discordgo.MessageComponent{
 			timeSelect,
+			buttonRow,
 		},
 	})
 }
 
-// TODO: get server config and pass in timezone
-func getTimeOptions(d time.Duration) []discordgo.SelectMenuOption {
-	startTime := time.Now().Truncate(time.Hour)
-	var timeOptions []discordgo.SelectMenuOption
+func sendUserAvailabilityResponse(dg DiscordSession, i *discordgo.InteractionCreate, message *discordgo.Message, userAvailability map[string][]time.Time) (*discordgo.Message, error) {
+	commonTimes := findCommonTimes(userAvailability, 3)
 
-	for t := startTime; t.Before(startTime.Add(24 * time.Hour)); t = t.Add(d) {
-		option := discordgo.SelectMenuOption{
-			Label: t.Format("3:04 PM"),
-			Value: t.Format(time.RFC3339),
+	messageEmbed := &discordgo.MessageEmbed{
+		Fields: getUserAvailabilityFields(userAvailability, commonTimes),
+	}
+
+	// a bit confusing because MassegeEdit returns nil
+	// we only need to get the message once to get the id
+	if message == nil {
+		message, err := dg.ChannelMessageSendEmbed(i.ChannelID, messageEmbed)
+
+		return message, err
+	}
+
+	var buttFuncs []components.ButtonFunc
+	for _, t := range commonTimes {
+		if t.IsZero() {
+			continue
 		}
 
-		timeOptions = append(timeOptions, option)
+		buttFuncs = append(buttFuncs, components.WithSubmitButton(dg, discordgo.Button{
+			Label: fmt.Sprintf("Create event for %s🚀", t.Format("3:04 PM MST")),
+		}, func(i *discordgo.InteractionCreate) {
+		}))
 	}
-	return timeOptions
+
+	var messageComponents []discordgo.MessageComponent
+	if len(buttFuncs) > 0 {
+		// ignore removeFuncs because we use submitButtons
+		eventButtonRow, _ := components.ButtonRow(dg, buttFuncs...)
+		messageComponents = append(messageComponents, eventButtonRow)
+	}
+
+	_, err := dg.ChannelMessageEditComplex(&discordgo.MessageEdit{
+		Channel:    i.ChannelID,
+		ID:         message.ID,
+		Embed:      messageEmbed,
+		Components: &messageComponents,
+	})
+
+	// if we are editing just return the passed in message
+	return message, err
 }
 
 func getUserAvailabilityFields(userAvailability map[string][]time.Time, commonTimes []time.Time) []*discordgo.MessageEmbedField {
@@ -291,7 +300,8 @@ func findCommonTimes(userAvailability map[string][]time.Time, topN int) []time.T
 	times := make([]time.Time, topN)
 	for timeSlot, count := range timeCount {
 		for i := 0; i < topN; i++ {
-			if timeCount[times[i]] < count && count > 0 {
+			// want at least 2 responses
+			if timeCount[times[i]] < count && count > 1 {
 				times[i] = timeSlot
 				break
 			}
@@ -299,4 +309,20 @@ func findCommonTimes(userAvailability map[string][]time.Time, topN int) []time.T
 	}
 
 	return times
+}
+
+// TODO: get server config and pass in timezone
+func getTimeOptions(d time.Duration) []discordgo.SelectMenuOption {
+	startTime := time.Now().Truncate(time.Hour)
+	var timeOptions []discordgo.SelectMenuOption
+
+	for t := startTime; t.Before(startTime.Add(24 * time.Hour)); t = t.Add(d) {
+		option := discordgo.SelectMenuOption{
+			Label: t.Format("3:04 PM"),
+			Value: t.Format(time.RFC3339),
+		}
+
+		timeOptions = append(timeOptions, option)
+	}
+	return timeOptions
 }
