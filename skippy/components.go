@@ -27,6 +27,7 @@ type WhensGoodForm struct {
 // TODO: doc
 func generateWhensGoodResponse(
 	dg DiscordSession,
+	componentHandler *components.ComponentHandler,
 	initialInteraction *discordgo.InteractionCreate,
 ) *discordgo.InteractionResponseData {
 	formData := &WhensGoodForm{
@@ -41,8 +42,7 @@ func generateWhensGoodResponse(
 		formData.Game = optionValue.StringValue()
 	}
 
-	var removeHandlerFuncs []func()
-	userSelect, removeHandlerFunc := components.SelectMenu(dg,
+	userSelect := componentHandler.SelectMenu(
 		discordgo.SelectMenu{
 			MenuType:    discordgo.SelectMenuType(discordgo.UserSelectMenuComponent),
 			Placeholder: "Select users",
@@ -51,9 +51,8 @@ func generateWhensGoodResponse(
 		func(i *discordgo.InteractionCreate) {
 			formData.UserIDS = i.MessageComponentData().Values
 		})
-	removeHandlerFuncs = append(removeHandlerFuncs, removeHandlerFunc)
 
-	startSelect, removeHandlerFunc := components.SelectMenu(dg,
+	startSelect := componentHandler.SelectMenu(
 		discordgo.SelectMenu{
 			Placeholder: "Start Time",
 			MaxValues:   1,
@@ -66,9 +65,8 @@ func generateWhensGoodResponse(
 				formData.StartTime = t
 			}
 		})
-	removeHandlerFuncs = append(removeHandlerFuncs, removeHandlerFunc)
 
-	endSelect, removeHandlerFunc := components.SelectMenu(dg,
+	endSelect := componentHandler.SelectMenu(
 		discordgo.SelectMenu{
 			Placeholder: "End Time",
 			MaxValues:   1,
@@ -81,7 +79,6 @@ func generateWhensGoodResponse(
 				formData.EndTime = t
 			}
 		})
-	removeHandlerFuncs = append(removeHandlerFuncs, removeHandlerFunc)
 
 	var intOptions []discordgo.SelectMenuOption
 	for i := 1; i <= 6; i++ {
@@ -93,16 +90,13 @@ func generateWhensGoodResponse(
 		)
 	}
 
-	buttFunc := components.WithSubmitButton(dg,
+	button := componentHandler.WithSubmitButton(
 		discordgo.Button{
 			Label: "Send",
 			Style: discordgo.PrimaryButton,
 		},
 		func(i *discordgo.InteractionCreate) {
 			log.Printf("Form was submitted with: %#v\n", *formData)
-			for _, removeHandlerFunc := range removeHandlerFuncs {
-				removeHandlerFunc()
-			}
 
 			newContent := "Sending message..."
 			if _, err := dg.InteractionResponseEdit(initialInteraction.Interaction, &discordgo.WebhookEdit{
@@ -111,12 +105,11 @@ func generateWhensGoodResponse(
 			}); err != nil {
 				log.Println("error updating message: ", err)
 			}
-			getUserAvailability(dg, formData)
+			getUserAvailability(dg, componentHandler, formData)
 		},
 	)
 
-	// ignore removeHandler because we used a submit button
-	buttonRow, _ := components.ButtonRow(dg, buttFunc)
+	buttonRow := components.ButtonRow(dg, button)
 
 	return &discordgo.InteractionResponseData{
 		Flags: discordgo.MessageFlagsEphemeral,
@@ -131,6 +124,7 @@ func generateWhensGoodResponse(
 
 func getUserAvailability(
 	dg DiscordSession,
+	componentHandler *components.ComponentHandler,
 	formData *WhensGoodForm,
 ) {
 	var timeOptions []discordgo.SelectMenuOption
@@ -152,7 +146,6 @@ func getUserAvailability(
 	}
 
 	userAvailability := make(map[string][]time.Time)
-	var removeHandlerFuncs []func()
 	var err error
 	var message *discordgo.Message
 
@@ -168,40 +161,33 @@ func getUserAvailability(
 
 		userAvailability[i.Member.User.ID] = timeSlots
 
-		message, err = sendUserAvailabilityResponse(dg, i, message, userAvailability, formData.Game)
+		message, err = sendUserAvailabilityResponse(dg, componentHandler, i, message, userAvailability, formData.Game)
 		if err != nil {
 			log.Println("error sending user availability response", err)
 		}
 	}
 
 	zero := 0
-	timeSelect, removeFunc := components.SelectMenu(dg,
+	timeSelect := componentHandler.SelectMenu(
 		discordgo.SelectMenu{
 			Placeholder: "When you on?",
 			MinValues:   &zero,
 			MaxValues:   len(timeOptions),
 			Options:     timeOptions,
 		}, onSelect)
-	removeHandlerFuncs = append(removeHandlerFuncs, removeFunc)
 
-	buttFunc := components.WithButton(dg, discordgo.Button{
-		Style: discordgo.DangerButton,
-		Label: "Can't",
-	}, func(i *discordgo.InteractionCreate) {
-		userAvailability[i.Member.User.ID] = []time.Time{}
-		message, err = sendUserAvailabilityResponse(dg, i, message, userAvailability, formData.Game)
-		if err != nil {
-			log.Println("error sending user availability response", err)
-		}
-	})
-	buttonRow, removeFuncs := components.ButtonRow(dg, buttFunc)
-	removeHandlerFuncs = append(removeHandlerFuncs, removeFuncs...)
-
-	time.AfterFunc(6*time.Hour, func() {
-		for _, removeFunc := range removeHandlerFuncs {
-			removeFunc()
-		}
-	})
+	cantButton := componentHandler.WithButton(
+		discordgo.Button{
+			Style: discordgo.DangerButton,
+			Label: "Can't",
+		}, func(i *discordgo.InteractionCreate) {
+			userAvailability[i.Member.User.ID] = []time.Time{}
+			message, err = sendUserAvailabilityResponse(dg, componentHandler, i, message, userAvailability, formData.Game)
+			if err != nil {
+				log.Println("error sending user availability response", err)
+			}
+		})
+	buttonRow := components.ButtonRow(dg, cantButton)
 
 	dg.ChannelMessageSendComplex(formData.ChannelID, &discordgo.MessageSend{
 		Components: []discordgo.MessageComponent{
@@ -211,7 +197,7 @@ func getUserAvailability(
 	})
 }
 
-func sendUserAvailabilityResponse(dg DiscordSession, i *discordgo.InteractionCreate, message *discordgo.Message, userAvailability map[string][]time.Time, activityName string) (*discordgo.Message, error) {
+func sendUserAvailabilityResponse(dg DiscordSession, componentHandler *components.ComponentHandler, i *discordgo.InteractionCreate, message *discordgo.Message, userAvailability map[string][]time.Time, activityName string) (*discordgo.Message, error) {
 	commonTimes := findCommonTimes(userAvailability, 3)
 
 	messageEmbed := &discordgo.MessageEmbed{
@@ -226,13 +212,13 @@ func sendUserAvailabilityResponse(dg DiscordSession, i *discordgo.InteractionCre
 		return message, err
 	}
 
-	var buttFuncs []components.ButtonFunc
+	var buttons []discordgo.Button
 	for _, t := range commonTimes {
 		if t.IsZero() {
 			continue
 		}
 
-		buttFuncs = append(buttFuncs, components.WithSubmitButton(dg, discordgo.Button{
+		buttons = append(buttons, componentHandler.WithSubmitButton(discordgo.Button{
 			Label: fmt.Sprintf("Create event for %s🚀", t.Format("3:04 PM MST")),
 		}, func(i *discordgo.InteractionCreate) {
 			scheduleEvent(dg, i.GuildID, activityName, t)
@@ -240,9 +226,9 @@ func sendUserAvailabilityResponse(dg DiscordSession, i *discordgo.InteractionCre
 	}
 
 	var messageComponents []discordgo.MessageComponent
-	if len(buttFuncs) > 0 {
+	if len(buttons) > 0 {
 		// ignore removeFuncs because we use submitButtons
-		eventButtonRow, _ := components.ButtonRow(dg, buttFuncs...)
+		eventButtonRow := components.ButtonRow(dg, buttons...)
 		messageComponents = append(messageComponents, eventButtonRow)
 	}
 
@@ -325,5 +311,6 @@ func getTimeOptions(d time.Duration) []discordgo.SelectMenuOption {
 
 		timeOptions = append(timeOptions, option)
 	}
+
 	return timeOptions
 }

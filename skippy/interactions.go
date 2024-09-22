@@ -161,7 +161,7 @@ func onCommand(
 			handleSlashCommandError(dg, i, err)
 		}
 	case WHENS_GOOD:
-		if err := handleWhensGood(dg, i); err != nil {
+		if err := handleWhensGood(dg, i, state); err != nil {
 			handleSlashCommandError(dg, i, err)
 		}
 	default:
@@ -435,8 +435,9 @@ func sendChannelMessage(
 func handleWhensGood(
 	dg DiscordSession,
 	i *discordgo.InteractionCreate,
+	state *State,
 ) error {
-	whensGoodResponse := generateWhensGoodResponse(dg, i)
+	whensGoodResponse := generateWhensGoodResponse(dg, state.GetComponentHandler(), i)
 
 	err := dg.InteractionRespond(i.Interaction,
 		&discordgo.InteractionResponse{

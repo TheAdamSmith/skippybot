@@ -19,81 +19,95 @@ type ComponentClient interface {
 	) error
 }
 
+type ComponentHandler struct {
+	client            ComponentClient // discord client
+	callbackFuncs     map[string]func(*discordgo.InteractionCreate)
+	removeHandlerFunc func()
+}
+
+func NewComponentHandler(client ComponentClient) *ComponentHandler {
+	componentHandler := &ComponentHandler{
+		client:        client,
+		callbackFuncs: map[string]func(*discordgo.InteractionCreate){},
+	}
+
+	removeHandlerFunc := client.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		if i.Type != discordgo.InteractionMessageComponent {
+			return
+		}
+		if callbackFunc, ok := componentHandler.callbackFuncs[i.MessageComponentData().CustomID]; ok {
+			callbackFunc(i)
+			noOpResponse(componentHandler.client, i)
+		} else {
+			if err := client.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "This component has expired",
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			},
+			); err != nil {
+				log.Println("Error sending response", err)
+			}
+		}
+	})
+
+	componentHandler.removeHandlerFunc = removeHandlerFunc
+
+	return componentHandler
+}
+
+func (c *ComponentHandler) Close() {
+	c.removeHandlerFunc()
+}
+
 // SelectMenu creates and overrides a new CustomID creates a handler that will execute onClick and send a default response
-// returns an ActionRow component and a func that will remove the created handler
-func SelectMenu(client ComponentClient, selectMenu discordgo.SelectMenu, onSelect func(i *discordgo.InteractionCreate)) (discordgo.ActionsRow, func()) {
+// returns an ActionRow component
+func (c *ComponentHandler) SelectMenu(selectMenu discordgo.SelectMenu, onSelect func(i *discordgo.InteractionCreate)) discordgo.ActionsRow {
 	componentID := uuid.New().String()
 	selectMenu.CustomID = componentID
+	c.callbackFuncs[componentID] = onSelect
 
 	return discordgo.ActionsRow{
-			Components: []discordgo.MessageComponent{
-				selectMenu,
-			},
-		}, client.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-			if i.Type != discordgo.InteractionMessageComponent || i.MessageComponentData().CustomID != componentID {
-				return
-			}
-			onSelect(i)
-			noOpResponse(client, i)
-		})
+		Components: []discordgo.MessageComponent{
+			selectMenu,
+		},
+	}
 }
 
 // WithButton returns a ButtonFunc to be used with ButtonRow
 // creates and overrides a new CustomID creates a handler that will execute onClick and send a default response
-func WithButton(client ComponentClient, button discordgo.Button, onClick func(i *discordgo.InteractionCreate)) ButtonFunc {
-	return func() (discordgo.Button, func()) {
-		componentID := uuid.New().String()
-		button.CustomID = componentID
+func (c *ComponentHandler) WithButton(button discordgo.Button, onClick func(i *discordgo.InteractionCreate)) discordgo.Button {
+	componentID := uuid.New().String()
+	button.CustomID = componentID
+	c.callbackFuncs[componentID] = onClick
 
-		return button,
-			client.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-				if i.Type != discordgo.InteractionMessageComponent || i.MessageComponentData().CustomID != componentID {
-					return
-				}
-				onClick(i)
-				noOpResponse(client, i)
-			})
-	}
+	return button
 }
 
 // WithSubmitButton returns a ButtonFunc with a submit button that dergisters its handler after click
 // creates and overrides a new CustomID creates a handler that will execute onClick and send a default response
-// onClick should handle deregistering other message component handlers
-func WithSubmitButton(client ComponentClient, button discordgo.Button, onClick func(i *discordgo.InteractionCreate)) ButtonFunc {
-	return func() (discordgo.Button, func()) {
-		componentID := uuid.New().String()
-		button.CustomID = componentID
-		var removeHandlerFunc func()
-
-		removeHandlerFunc = client.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-			if i.Type != discordgo.InteractionMessageComponent || i.MessageComponentData().CustomID != componentID {
-				return
-			}
-			onClick(i)
-			noOpResponse(client, i)
-
-			removeHandlerFunc()
-		})
-
-		return button, removeHandlerFunc
+func (c *ComponentHandler) WithSubmitButton(button discordgo.Button, onClick func(i *discordgo.InteractionCreate)) discordgo.Button {
+	componentID := uuid.New().String()
+	button.CustomID = componentID
+	c.callbackFuncs[componentID] = func(i *discordgo.InteractionCreate) {
+		onClick(i)
+		delete(c.callbackFuncs, componentID)
 	}
+
+	return button
 }
 
 // ButtonRow executes the ButtonFuncs to that create the buttons and register each handler. See WithButton and WithSubmitButton.
-// returns an ActionRow component and a list of funcs that will remove each created handler
-func ButtonRow(client ComponentClient, buttFuncs ...ButtonFunc) (discordgo.ActionsRow, []func()) {
-	var components []discordgo.MessageComponent
-	var handlerFuncs []func()
-
-	for _, buttFunc := range buttFuncs {
-		button, handlerFunc := buttFunc()
-		components = append(components, button)
-		handlerFuncs = append(handlerFuncs, handlerFunc)
+// returns an ActionRow component
+func ButtonRow(client ComponentClient, buttons ...discordgo.Button) discordgo.ActionsRow {
+	components := make([]discordgo.MessageComponent, len(buttons))
+	for i, button := range buttons {
+		components[i] = button
 	}
-
 	return discordgo.ActionsRow{
 		Components: components,
-	}, handlerFuncs
+	}
 }
 
 func noOpResponse(client ComponentClient, i *discordgo.InteractionCreate) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"skippybot/components"
 	"sync"
 
 	openai "github.com/sashabaranov/go-openai"
@@ -11,13 +12,14 @@ import (
 
 // TODO: make channel id type
 type State struct {
-	threadMap       map[string]*ChatThread
-	userPresenceMap map[string]UserPresence
-	assistantID     string
-	mu              sync.RWMutex
-	discordToken    string
-	stockApiKey     string
-	weatherApiKey   string
+	threadMap        map[string]*ChatThread
+	userPresenceMap  map[string]UserPresence
+	componentHandler *components.ComponentHandler
+	assistantID      string
+	mu               sync.RWMutex
+	discordToken     string
+	stockApiKey      string
+	weatherApiKey    string
 	// TODO
 	// this is a temporary fix that removes some dependency on
 	// the Config struct. The config struct should be moved into here
@@ -42,15 +44,21 @@ func NewState(
 	discordToken string,
 	stockApiKey string,
 	weatherApiKey string,
+	componentClient components.ComponentClient,
 ) *State {
 	return &State{
-		threadMap:       make(map[string]*ChatThread),
-		userPresenceMap: make(map[string]UserPresence),
-		assistantID:     assistantID,
-		discordToken:    discordToken,
-		stockApiKey:     stockApiKey,
-		weatherApiKey:   weatherApiKey,
+		threadMap:        make(map[string]*ChatThread),
+		userPresenceMap:  make(map[string]UserPresence),
+		componentHandler: components.NewComponentHandler(componentClient),
+		assistantID:      assistantID,
+		discordToken:     discordToken,
+		stockApiKey:      stockApiKey,
+		weatherApiKey:    weatherApiKey,
 	}
+}
+
+func (s *State) Close() {
+	s.componentHandler.Close()
 }
 
 func (s *State) GetThread(threadID string) (*ChatThread, bool) {
@@ -209,6 +217,12 @@ func (s *State) GetAwaitsResponse(threadID string) bool {
 		return false
 	}
 	return thread.awaitsResponse
+}
+
+func (s *State) GetComponentHandler() *components.ComponentHandler {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.componentHandler
 }
 
 func (s *State) GetDiscordToken() string {

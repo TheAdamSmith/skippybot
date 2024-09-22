@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -30,20 +29,12 @@ func RunDiscord(
 	config *Config,
 	db Database,
 ) {
-	state := NewState(assistantID, token, stockAPIKey, weatherAPIKey)
-	// TODO: fix
-	state.openAIModel = config.OpenAIModel
-	scheduler, err := NewScheduler()
-	if err != nil {
-		log.Fatal("could not create scheduler", err)
-	}
-	scheduler.Start()
-
 	session, err := discordgo.New("Bot " + token)
 	if err != nil {
 		log.Fatalln("Unable to get discord client")
 	}
 
+	// TODO: scope down intents
 	session.Identify.Intents = discordgo.IntentsAll
 
 	err = session.Open()
@@ -58,36 +49,29 @@ func RunDiscord(
 
 	dg := NewDiscordBot(session)
 
+	state := NewState(assistantID, token, stockAPIKey, weatherAPIKey, dg)
+	// TODO: fix
+	state.openAIModel = config.OpenAIModel
+
+	scheduler, err := NewScheduler()
+	if err != nil {
+		log.Fatal("could not create scheduler", err)
+	}
+	scheduler.Start()
+
 	scheduler.AddDurationJob(POLL_INTERVAL, func() {
 		pollPresenceStatus(context.Background(), dg, client, state, db, config)
 	})
 
-	session.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
+	dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
 		messageCreate(dg, m, client, state, scheduler, config)
 	})
 
-	session.AddHandler(
+	dg.AddHandler(
 		func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			switch i.Type {
 			case discordgo.InteractionApplicationCommand:
 				onCommand(dg, i, client, state, db, config)
-			case discordgo.InteractionMessageComponent:
-				// Only respond with default reponse. Individual components will manage their own handlers
-				go func() {
-					// InteractonResponse timeout is 3 seconds
-					// sleep to let other handlers respond first
-					time.Sleep(2500 * time.Millisecond)
-					if err := dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-						Type: discordgo.InteractionResponseChannelMessageWithSource,
-						Data: &discordgo.InteractionResponseData{
-							Content: "This interaction has completed",
-							Flags:   discordgo.MessageFlagsEphemeral,
-						},
-					},
-					); err != nil && !strings.Contains(err.Error(), "Interaction has already been acknowledged.") {
-						log.Println("Error sending response", err)
-					}
-				}()
 			}
 		},
 	)
@@ -95,7 +79,7 @@ func RunDiscord(
 	// discord presence update repeates calls rapidly
 	// might be from multiple servers so debounce the calls
 	debouncer := NewDebouncer(config.PresenceUpdateDebouncDelay)
-	session.AddHandler(func(s *discordgo.Session, p *discordgo.PresenceUpdate) {
+	dg.AddHandler(func(s *discordgo.Session, p *discordgo.PresenceUpdate) {
 		onPresenceUpdateDebounce(dg, p, state, db, debouncer, config)
 	})
 
@@ -229,8 +213,6 @@ func getAndSendResponseWithoutTools(
 	client *openai.Client,
 	state *State,
 ) error {
-	dg.ChannelTyping(dgChannID)
-
 	log.Printf("Using message: %s\n", messageReq.Content)
 
 	log.Println("Attempting to get response...")
@@ -277,8 +259,6 @@ func getAndSendResponse(
 	scheduler *Scheduler,
 	config *Config,
 ) error {
-	dg.ChannelTyping(dgChannID)
-
 	log.Printf("Using message: %s\n", messageReq.Content)
 
 	log.Println("Attempting to get response...")

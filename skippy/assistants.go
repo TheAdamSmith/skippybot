@@ -105,6 +105,7 @@ func GetResponse(
 	runDelay := 1
 	prevStatus := run.Status
 	for {
+		dg.ChannelTyping(dgChannID)
 		run, err = client.RetrieveRun(ctx, run.ThreadID, run.ID)
 		if err != nil {
 			log.Println("error retrieving run: ", err)
@@ -156,6 +157,7 @@ func GetResponse(
 
 		}
 
+		// TODO: make this a const duration
 		time.Sleep(time.Duration(100*runDelay) * time.Millisecond)
 		runDelay++
 	}
