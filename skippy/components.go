@@ -168,7 +168,7 @@ func getUserAvailability(
 
 		userAvailability[i.Member.User.ID] = timeSlots
 
-		message, err = sendUserAvailabilityResponse(dg, i, message, userAvailability)
+		message, err = sendUserAvailabilityResponse(dg, i, message, userAvailability, formData.Game)
 		if err != nil {
 			log.Println("error sending user availability response", err)
 		}
@@ -189,7 +189,7 @@ func getUserAvailability(
 		Label: "Can't",
 	}, func(i *discordgo.InteractionCreate) {
 		userAvailability[i.Member.User.ID] = []time.Time{}
-		message, err = sendUserAvailabilityResponse(dg, i, message, userAvailability)
+		message, err = sendUserAvailabilityResponse(dg, i, message, userAvailability, formData.Game)
 		if err != nil {
 			log.Println("error sending user availability response", err)
 		}
@@ -211,7 +211,7 @@ func getUserAvailability(
 	})
 }
 
-func sendUserAvailabilityResponse(dg DiscordSession, i *discordgo.InteractionCreate, message *discordgo.Message, userAvailability map[string][]time.Time) (*discordgo.Message, error) {
+func sendUserAvailabilityResponse(dg DiscordSession, i *discordgo.InteractionCreate, message *discordgo.Message, userAvailability map[string][]time.Time, activityName string) (*discordgo.Message, error) {
 	commonTimes := findCommonTimes(userAvailability, 3)
 
 	messageEmbed := &discordgo.MessageEmbed{
@@ -235,6 +235,7 @@ func sendUserAvailabilityResponse(dg DiscordSession, i *discordgo.InteractionCre
 		buttFuncs = append(buttFuncs, components.WithSubmitButton(dg, discordgo.Button{
 			Label: fmt.Sprintf("Create event for %s🚀", t.Format("3:04 PM MST")),
 		}, func(i *discordgo.InteractionCreate) {
+			scheduleEvent(dg, i.GuildID, activityName, t)
 		}))
 	}
 
@@ -301,7 +302,7 @@ func findCommonTimes(userAvailability map[string][]time.Time, topN int) []time.T
 	for timeSlot, count := range timeCount {
 		for i := 0; i < topN; i++ {
 			// want at least 2 responses
-			if timeCount[times[i]] < count && count > 1 {
+			if timeCount[times[i]] < count && count > 0 {
 				times[i] = timeSlot
 				break
 			}
