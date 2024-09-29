@@ -36,8 +36,8 @@ func NewComponentHandler(client ComponentClient) *ComponentHandler {
 			return
 		}
 		if callbackFunc, ok := componentHandler.callbackFuncs[i.MessageComponentData().CustomID]; ok {
-			callbackFunc(i)
 			noOpResponse(componentHandler.client, i)
+			callbackFunc(i)
 		} else {
 			if err := client.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,

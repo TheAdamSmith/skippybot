@@ -8,25 +8,23 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-func scheduleEvent(dg DiscordSession, guildID string, name string, startTime time.Time) {
+func scheduleEvent(dg DiscordSession, guildID string, name string, description string, startTime time.Time) (*discordgo.GuildScheduledEvent, error) {
 	channel, err := getTopVoiceChannel(dg, guildID)
 	if err != nil {
 		log.Println("could not get top voice channel: ", err)
-		return
+		return nil, err
 	}
 	if name == "" {
 		name = "Chillin"
 	}
-	_, err = dg.GuildScheduledEventCreate(guildID, &discordgo.GuildScheduledEventParams{
+	return dg.GuildScheduledEventCreate(guildID, &discordgo.GuildScheduledEventParams{
 		Name:               name,
+		Description:        description,
 		ScheduledStartTime: &startTime,
 		EntityType:         discordgo.GuildScheduledEventEntityTypeVoice,
 		PrivacyLevel:       discordgo.GuildScheduledEventPrivacyLevelGuildOnly,
 		ChannelID:          channel.ID,
 	})
-	if err != nil {
-		log.Println(err)
-	}
 }
 
 func getTopVoiceChannel(dg DiscordSession, guildID string) (*discordgo.Channel, error) {

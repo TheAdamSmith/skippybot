@@ -20,6 +20,7 @@ const (
 	SetReminder          string = "set_reminder"
 	GenerateImage        string = "generate_image"
 	ToggleMorningMessage string = "toggle_morning_message"
+	GenerateEvent        string = "generate_event"
 )
 
 type FuncArgs struct {
@@ -54,6 +55,13 @@ type ReminderFuncArgs struct {
 	UserID      string `json:"user_id,omitempty"`
 }
 
+// TODO: find where this should live
+type EventFuncArgs struct {
+	Description         string `json:"description"`
+	Name                string `json:"name"`
+	NotificationMessage string `json:"notification_message"`
+}
+
 // Gets a response from the ai.
 //
 // Sends message to thread, generates and executes a run.
@@ -63,7 +71,6 @@ type ReminderFuncArgs struct {
 func GetResponse(
 	ctx context.Context,
 	dg DiscordSession,
-	threadID string,
 	dgChannID string,
 	messageReq openai.MessageRequest,
 	additionalInstructions string,
@@ -77,7 +84,16 @@ func GetResponse(
 ) (string, error) {
 	assistantID := state.GetAssistantID()
 
-	_, err := client.CreateMessage(ctx, threadID, messageReq)
+	thread, err := state.GetOrCreateThread(dgChannID, client)
+	if err != nil {
+		return "", err
+	}
+
+	// lock the thread because we can't queue additional messages during a run
+	state.LockThread(dgChannID)
+	defer state.UnLockThread(dgChannID)
+
+	_, err = client.CreateMessage(ctx, thread.openAIThread.ID, messageReq)
 	if err != nil {
 		log.Println("Unable to create message", err)
 		return "", err
@@ -93,7 +109,7 @@ func GetResponse(
 		runReq.ToolChoice = "none"
 	}
 
-	run, err := client.CreateRun(ctx, threadID, runReq)
+	run, err := client.CreateRun(ctx, thread.openAIThread.ID, runReq)
 	if err != nil {
 		log.Println("Unable to create run:", err)
 		return "", err
@@ -129,12 +145,12 @@ func GetResponse(
 			return "", fmt.Errorf(errorMsg)
 		case openai.RunStatusCompleted:
 			log.Println("Usage: ", run.Usage.TotalTokens)
-			messageList, err := client.ListMessage(ctx, threadID, nil, nil, nil, nil)
+			messageList, err := client.ListMessage(ctx, thread.openAIThread.ID, nil, nil, nil, nil)
 			if err != nil {
 				return "", fmt.Errorf("unable to get messages: %s", err)
 			}
 
-			log.Println("Recieived message from thread: ", threadID)
+			log.Println("Recieived message from thread: ", thread.openAIThread.ID)
 
 			message, err := getFirstMessage(messageList)
 			if err != nil {
@@ -147,13 +163,113 @@ func GetResponse(
 			if disableFunctions || config == nil || scheduler == nil {
 				return "", fmt.Errorf("recieved required action when tools disabled")
 			}
-			run, err = handleRequiresAction(ctx, dg, run, dgChannID, threadID, client, state, scheduler, config)
+			run, err = handleRequiresAction(ctx, dg, run, dgChannID, thread.openAIThread.ID, client, state, scheduler, config)
 			if err != nil {
 				return "", err
 			}
 		default:
 			log.Println("recieved unkown status from openai")
 			return "", fmt.Errorf("receieved unknown status from openai")
+
+		}
+
+		// TODO: make this a const duration
+		time.Sleep(time.Duration(100*runDelay) * time.Millisecond)
+		runDelay++
+	}
+}
+
+func GetToolResponse(
+	ctx context.Context,
+	dg DiscordSession,
+	dgChannID string,
+	messageReq openai.MessageRequest,
+	additionalInstructions string,
+	tool openai.Tool,
+	client *openai.Client,
+	state *State,
+) ([]FuncArgs, error) {
+	assistantID := state.GetAssistantID()
+
+	// lock the thread because we can't queue additional messages during a run
+	thread, err := state.GetOrCreateThread(dgChannID, client)
+	if err != nil {
+		return []FuncArgs{}, err
+	}
+
+	state.LockThread(dgChannID)
+	defer state.UnLockThread(dgChannID)
+
+	_, err = client.CreateMessage(ctx, thread.openAIThread.ID, messageReq)
+	if err != nil {
+		log.Println("Unable to create message", err)
+		return []FuncArgs{}, err
+	}
+	runReq := openai.RunRequest{
+		AssistantID:            assistantID,
+		AdditionalInstructions: additionalInstructions,
+		Model:                  state.openAIModel,
+		Tools:                  []openai.Tool{tool},
+		ToolChoice: openai.ToolChoice{
+			Type: openai.ToolTypeFunction,
+			Function: openai.ToolFunction{
+				Name: tool.Function.Name,
+			},
+		},
+	}
+
+	run, err := client.CreateRun(ctx, thread.openAIThread.ID, runReq)
+	if err != nil {
+		log.Println("Unable to create run:", err)
+		return []FuncArgs{}, err
+	}
+
+	log.Println("Initial Run id: ", run.ID)
+	log.Println("Run status: ", run.Status)
+
+	runDelay := 1
+	prevStatus := run.Status
+	for {
+		dg.ChannelTyping(dgChannID)
+		run, err = client.RetrieveRun(ctx, run.ThreadID, run.ID)
+		if err != nil {
+			log.Println("error retrieving run: ", err)
+		}
+
+		if prevStatus != run.Status {
+			log.Printf("Run status: %s\n", run.Status)
+			prevStatus = run.Status
+		}
+
+		switch run.Status {
+		case openai.RunStatusInProgress, openai.RunStatusQueued:
+			continue
+		case openai.RunStatusFailed:
+			errorMsg := fmt.Sprintf(
+				"openai run failed with code code (%s): %s",
+				run.LastError.Code,
+				run.LastError.Message,
+			)
+			log.Println(errorMsg)
+			return []FuncArgs{}, fmt.Errorf(errorMsg)
+		case openai.RunStatusCompleted:
+
+			return []FuncArgs{}, fmt.Errorf("got to run_status completed during function call")
+		case openai.RunStatusRequiresAction:
+			funcArgs := GetFunctionArgs(run)
+
+			var toolOutputs []openai.ToolOutput
+			for _, funcArg := range funcArgs {
+				toolOutputs = append(
+					toolOutputs,
+					openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: "no-op"},
+				)
+			}
+			submitToolOutputs(client, toolOutputs, thread.openAIThread.ID, run.ID)
+			return funcArgs, nil
+		default:
+			log.Println("recieved unkown status from openai")
+			return []FuncArgs{}, fmt.Errorf("receieved unknown status from openai")
 
 		}
 
@@ -500,6 +616,7 @@ func toggleMorningMsg(
 	}
 
 	log.Println("Setting the Morning Msg for: ", givenTime)
+
 	scheduler.AddMorningMsgJob(
 		channelID,
 		givenTime,

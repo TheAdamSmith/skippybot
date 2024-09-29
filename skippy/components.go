@@ -1,13 +1,17 @@
 package skippy
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"skippybot/components"
+	"sort"
 	"strconv"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/sashabaranov/go-openai"
 )
 
 type EventScheduler struct {
@@ -27,7 +31,8 @@ type WhensGoodForm struct {
 // TODO: doc
 func generateWhensGoodResponse(
 	dg DiscordSession,
-	componentHandler *components.ComponentHandler,
+	state *State,
+	client *openai.Client,
 	initialInteraction *discordgo.InteractionCreate,
 ) *discordgo.InteractionResponseData {
 	formData := &WhensGoodForm{
@@ -40,9 +45,11 @@ func generateWhensGoodResponse(
 	)
 	if ok {
 		formData.Game = optionValue.StringValue()
+	} else {
+		formData.Game = "chillin"
 	}
 
-	userSelect := componentHandler.SelectMenu(
+	userSelect := state.componentHandler.SelectMenu(
 		discordgo.SelectMenu{
 			MenuType:    discordgo.SelectMenuType(discordgo.UserSelectMenuComponent),
 			Placeholder: "Select users",
@@ -52,7 +59,7 @@ func generateWhensGoodResponse(
 			formData.UserIDS = i.MessageComponentData().Values
 		})
 
-	startSelect := componentHandler.SelectMenu(
+	startSelect := state.componentHandler.SelectMenu(
 		discordgo.SelectMenu{
 			Placeholder: "Start Time",
 			MaxValues:   1,
@@ -66,7 +73,7 @@ func generateWhensGoodResponse(
 			}
 		})
 
-	endSelect := componentHandler.SelectMenu(
+	endSelect := state.componentHandler.SelectMenu(
 		discordgo.SelectMenu{
 			Placeholder: "End Time",
 			MaxValues:   1,
@@ -90,7 +97,7 @@ func generateWhensGoodResponse(
 		)
 	}
 
-	button := componentHandler.WithSubmitButton(
+	button := state.componentHandler.WithSubmitButton(
 		discordgo.Button{
 			Label: "Send",
 			Style: discordgo.PrimaryButton,
@@ -105,7 +112,7 @@ func generateWhensGoodResponse(
 			}); err != nil {
 				log.Println("error updating message: ", err)
 			}
-			getUserAvailability(dg, componentHandler, formData)
+			getUserAvailability(dg, state, client, initialInteraction, formData)
 		},
 	)
 
@@ -124,7 +131,9 @@ func generateWhensGoodResponse(
 
 func getUserAvailability(
 	dg DiscordSession,
-	componentHandler *components.ComponentHandler,
+	state *State,
+	client *openai.Client,
+	initialInteraction *discordgo.InteractionCreate,
 	formData *WhensGoodForm,
 ) {
 	var timeOptions []discordgo.SelectMenuOption
@@ -146,7 +155,7 @@ func getUserAvailability(
 	}
 
 	userAvailability := make(map[string][]time.Time)
-	var err error
+	var respErr error
 	var message *discordgo.Message
 
 	onSelect := func(i *discordgo.InteractionCreate) {
@@ -161,14 +170,14 @@ func getUserAvailability(
 
 		userAvailability[i.Member.User.ID] = timeSlots
 
-		message, err = sendUserAvailabilityResponse(dg, componentHandler, i, message, userAvailability, formData.Game)
-		if err != nil {
-			log.Println("error sending user availability response", err)
+		message, respErr = sendUserAvailabilityResponse(dg, state, client, i, message, userAvailability, formData.Game)
+		if respErr != nil {
+			log.Println("error sending user availability response", respErr)
 		}
 	}
 
 	zero := 0
-	timeSelect := componentHandler.SelectMenu(
+	timeSelect := state.componentHandler.SelectMenu(
 		discordgo.SelectMenu{
 			Placeholder: "When you on?",
 			MinValues:   &zero,
@@ -176,20 +185,26 @@ func getUserAvailability(
 			Options:     timeOptions,
 		}, onSelect)
 
-	cantButton := componentHandler.WithButton(
+	cantButton := state.componentHandler.WithButton(
 		discordgo.Button{
 			Style: discordgo.DangerButton,
 			Label: "Can't",
 		}, func(i *discordgo.InteractionCreate) {
 			userAvailability[i.Member.User.ID] = []time.Time{}
-			message, err = sendUserAvailabilityResponse(dg, componentHandler, i, message, userAvailability, formData.Game)
-			if err != nil {
-				log.Println("error sending user availability response", err)
+			message, respErr = sendUserAvailabilityResponse(dg, state, client, i, message, userAvailability, formData.Game)
+			if respErr != nil {
+				log.Println("error sending user availability response", respErr)
 			}
 		})
 	buttonRow := components.ButtonRow(dg, cantButton)
 
+	content, err := getUserAvailabilityContent(dg, state, client, initialInteraction, formData)
+	if err != nil {
+		log.Println("error generating content for user availability message", err)
+	}
+
 	dg.ChannelMessageSendComplex(formData.ChannelID, &discordgo.MessageSend{
+		Content: content,
 		Components: []discordgo.MessageComponent{
 			timeSelect,
 			buttonRow,
@@ -197,8 +212,33 @@ func getUserAvailability(
 	})
 }
 
-func sendUserAvailabilityResponse(dg DiscordSession, componentHandler *components.ComponentHandler, i *discordgo.InteractionCreate, message *discordgo.Message, userAvailability map[string][]time.Time, activityName string) (*discordgo.Message, error) {
-	commonTimes := findCommonTimes(userAvailability, 3)
+func getUserAvailabilityContent(dg DiscordSession, state *State, client *openai.Client, initialInteraction *discordgo.InteractionCreate, formData *WhensGoodForm) (string, error) {
+	messageReq := openai.MessageRequest{
+		Role:    openai.ChatMessageRoleUser,
+		Content: makeTimeSelectInstructions(formData, initialInteraction),
+	}
+
+	response, err := GetResponse(
+		context.Background(),
+		dg,
+		initialInteraction.ChannelID,
+		messageReq,
+		"",
+		true,
+		client,
+		state,
+		nil,
+		nil,
+	)
+	if err != nil {
+		return "", err
+	}
+
+	return response, nil
+}
+
+func sendUserAvailabilityResponse(dg DiscordSession, state *State, client *openai.Client, i *discordgo.InteractionCreate, message *discordgo.Message, userAvailability map[string][]time.Time, activityName string) (*discordgo.Message, error) {
+	commonTimes, userTimeMap := findCommonTimes(userAvailability, 3)
 
 	messageEmbed := &discordgo.MessageEmbed{
 		Fields: getUserAvailabilityFields(userAvailability, commonTimes),
@@ -218,16 +258,15 @@ func sendUserAvailabilityResponse(dg DiscordSession, componentHandler *component
 			continue
 		}
 
-		buttons = append(buttons, componentHandler.WithSubmitButton(discordgo.Button{
+		buttons = append(buttons, state.componentHandler.WithSubmitButton(discordgo.Button{
 			Label: fmt.Sprintf("Create event for %s🚀", t.Format("3:04 PM MST")),
 		}, func(i *discordgo.InteractionCreate) {
-			scheduleEvent(dg, i.GuildID, activityName, t)
+			generateAndScheduleEvent(dg, state, client, i, activityName, userTimeMap[t], t)
 		}))
 	}
 
 	var messageComponents []discordgo.MessageComponent
 	if len(buttons) > 0 {
-		// ignore removeFuncs because we use submitButtons
 		eventButtonRow := components.ButtonRow(dg, buttons...)
 		messageComponents = append(messageComponents, eventButtonRow)
 	}
@@ -241,6 +280,38 @@ func sendUserAvailabilityResponse(dg DiscordSession, componentHandler *component
 
 	// if we are editing just return the passed in message
 	return message, err
+}
+
+func generateAndScheduleEvent(dg DiscordSession, state *State, client *openai.Client, i *discordgo.InteractionCreate, activityName string, availableUserIDs []string, t time.Time) {
+	content := fmt.Sprintf("activity: %s\n time: %s\n users: ", activityName, t.Format("3:04 PM"))
+	for _, userID := range availableUserIDs {
+		content += UserMention(userID)
+	}
+	messageReq := openai.MessageRequest{
+		Role:    openai.ChatMessageRoleUser,
+		Content: content,
+	}
+
+	funcArgs, err := GetToolResponse(context.Background(), dg, i.ChannelID, messageReq, "", GenerateEventTool, client, state)
+	if err != nil {
+		log.Println("could not generate event data", err)
+		dg.ChannelMessageSend(i.ChannelID, ERROR_RESPONSE)
+		return
+	}
+
+	var eventFuncArgs EventFuncArgs
+	if err := json.Unmarshal([]byte(funcArgs[0].JsonValue), &eventFuncArgs); err != nil {
+		log.Println("could not read eventFuncArgs", err)
+		dg.ChannelMessageSend(i.ChannelID, ERROR_RESPONSE)
+		return
+	}
+	if event, err := scheduleEvent(dg, i.GuildID, eventFuncArgs.Name, eventFuncArgs.Description, t); err != nil {
+		log.Println("unabled to schedule event", err)
+		dg.ChannelMessageSend(i.ChannelID, ERROR_RESPONSE)
+	} else {
+		message := eventFuncArgs.NotificationMessage + fmt.Sprintf("\nhttps://discord.com/events/%s/%s", event.GuildID, event.ID)
+		dg.ChannelMessageSend(i.ChannelID, message)
+	}
 }
 
 func getUserAvailabilityFields(userAvailability map[string][]time.Time, commonTimes []time.Time) []*discordgo.MessageEmbedField {
@@ -276,26 +347,29 @@ func getUserAvailabilityFields(userAvailability map[string][]time.Time, commonTi
 	return fields
 }
 
-func findCommonTimes(userAvailability map[string][]time.Time, topN int) []time.Time {
-	timeCount := make(map[time.Time]int)
-	for _, timeSlots := range userAvailability {
+func findCommonTimes(userAvailability map[string][]time.Time, topN int) ([]time.Time, map[time.Time][]string) {
+	timeMap := make(map[time.Time][]string)
+	var timeList []time.Time
+	for userID, timeSlots := range userAvailability {
 		for _, timeSlot := range timeSlots {
-			timeCount[timeSlot]++
+			timeMap[timeSlot] = append(timeMap[timeSlot], userID)
+			timeList = append(timeList, timeSlot)
 		}
 	}
 
-	times := make([]time.Time, topN)
-	for timeSlot, count := range timeCount {
-		for i := 0; i < topN; i++ {
-			// want at least 2 responses
-			if timeCount[times[i]] < count && count > 0 {
-				times[i] = timeSlot
-				break
-			}
-		}
+	sort.Slice(timeList, func(i, j int) bool {
+		return len(timeMap[timeList[i]]) > len(timeMap[timeList[j]])
+	})
+	topTimes := timeList
+	if len(topTimes) > topN {
+		topTimes = topTimes[:topN]
+	}
+	commonTimes := make(map[time.Time][]string)
+	for _, t := range topTimes {
+		commonTimes[t] = timeMap[t]
 	}
 
-	return times
+	return topTimes, commonTimes
 }
 
 // TODO: get server config and pass in timezone
@@ -313,4 +387,17 @@ func getTimeOptions(d time.Duration) []discordgo.SelectMenuOption {
 	}
 
 	return timeOptions
+}
+
+func makeTimeSelectInstructions(formData *WhensGoodForm, i *discordgo.InteractionCreate) string {
+	users := i.Member.User.Mention()
+	for _, userID := range formData.UserIDS {
+		users += fmt.Sprintf(",%s", UserMention(userID))
+	}
+
+	return fmt.Sprintf(`you are generating a the message content in an interactive discord message for. 
+		Asking %s when is a good time for %s. Generate just the content in your response, but be descriptive about the activity and snarky to the users. Do not include the current time.`,
+		users,
+		formData.Game,
+	)
 }

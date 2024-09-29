@@ -2,7 +2,6 @@ package skippy
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -217,18 +216,9 @@ func getAndSendResponseWithoutTools(
 
 	log.Println("Attempting to get response...")
 
-	thread, err := state.GetOrCreateThread(dgChannID, client)
-	if err != nil {
-		return fmt.Errorf("getAndSendResponseWithoutTools failed with channelID %s %w", dgChannID, err)
-	}
-	// lock the thread because we can't queue additional messages during a run
-	state.LockThread(dgChannID)
-	defer state.UnLockThread(dgChannID)
-
 	response, err := GetResponse(
 		ctx,
 		dg,
-		thread.openAIThread.ID,
 		dgChannID,
 		messageReq,
 		additionalInstructions,
@@ -263,18 +253,9 @@ func getAndSendResponse(
 
 	log.Println("Attempting to get response...")
 
-	thread, err := state.GetOrCreateThread(dgChannID, client)
-	if err != nil {
-		return fmt.Errorf("getAndSendResponse failed with channelID %s %w", dgChannID, err)
-	}
-	// lock the thread because we can't queue additional messages during a run
-	state.LockThread(dgChannID)
-	defer state.UnLockThread(dgChannID)
-
 	response, err := GetResponse(
 		ctx,
 		dg,
-		thread.openAIThread.ID,
 		dgChannID,
 		messageReq,
 		additionalInstructions,

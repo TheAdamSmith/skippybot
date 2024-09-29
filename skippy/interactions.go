@@ -161,7 +161,7 @@ func onCommand(
 			handleSlashCommandError(dg, i, err)
 		}
 	case WHENS_GOOD:
-		if err := handleWhensGood(dg, i, state); err != nil {
+		if err := handleWhensGood(dg, i, state, client); err != nil {
 			handleSlashCommandError(dg, i, err)
 		}
 	default:
@@ -436,8 +436,9 @@ func handleWhensGood(
 	dg DiscordSession,
 	i *discordgo.InteractionCreate,
 	state *State,
+	client *openai.Client,
 ) error {
-	whensGoodResponse := generateWhensGoodResponse(dg, state.GetComponentHandler(), i)
+	whensGoodResponse := generateWhensGoodResponse(dg, state, client, i)
 
 	err := dg.InteractionRespond(i.Interaction,
 		&discordgo.InteractionResponse{
