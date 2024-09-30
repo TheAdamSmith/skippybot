@@ -23,6 +23,7 @@ type EventScheduler struct {
 type WhensGoodForm struct {
 	UserIDS   []string
 	Game      string
+	Date      time.Time
 	StartTime time.Time
 	ChannelID string
 	EndTime   time.Time
@@ -35,8 +36,12 @@ func generateWhensGoodResponse(
 	client *openai.Client,
 	initialInteraction *discordgo.InteractionCreate,
 ) *discordgo.InteractionResponseData {
+	now := time.Now().Truncate(time.Hour)
 	formData := &WhensGoodForm{
 		ChannelID: initialInteraction.ChannelID,
+		Date:      now,
+		StartTime: now,
+		EndTime:   now.Add(5 * time.Hour),
 	}
 
 	optionValue, ok := findCommandOption(
@@ -57,6 +62,20 @@ func generateWhensGoodResponse(
 		},
 		func(i *discordgo.InteractionCreate) {
 			formData.UserIDS = i.MessageComponentData().Values
+		})
+
+	dateSelect := state.componentHandler.SelectMenu(
+		discordgo.SelectMenu{
+			Placeholder: "Start Time",
+			MaxValues:   1,
+			Options:     getDateOptions(),
+		},
+		func(i *discordgo.InteractionCreate) {
+			if t, err := time.Parse(time.RFC3339, i.MessageComponentData().Values[0]); err != nil {
+				log.Println("error parsing time: ", err)
+			} else {
+				formData.Date = t
+			}
 		})
 
 	startSelect := state.componentHandler.SelectMenu(
@@ -103,7 +122,8 @@ func generateWhensGoodResponse(
 			Style: discordgo.PrimaryButton,
 		},
 		func(i *discordgo.InteractionCreate) {
-			log.Printf("Form was submitted with: %#v\n", *formData)
+			formData.StartTime = combineDateTime(formData.Date, formData.StartTime)
+			formData.EndTime = combineDateTime(formData.Date, formData.EndTime)
 
 			newContent := "Sending message..."
 			if _, err := dg.InteractionResponseEdit(initialInteraction.Interaction, &discordgo.WebhookEdit{
@@ -122,6 +142,7 @@ func generateWhensGoodResponse(
 		Flags: discordgo.MessageFlagsEphemeral,
 		Components: []discordgo.MessageComponent{
 			userSelect,
+			dateSelect,
 			startSelect,
 			endSelect,
 			buttonRow,
@@ -170,7 +191,7 @@ func getUserAvailability(
 
 		userAvailability[i.Member.User.ID] = timeSlots
 
-		message, respErr = sendUserAvailabilityResponse(dg, state, client, i, message, userAvailability, formData.Game)
+		message, respErr = sendUserAvailabilityResponse(dg, state, client, i, message, userAvailability, formData)
 		if respErr != nil {
 			log.Println("error sending user availability response", respErr)
 		}
@@ -191,7 +212,7 @@ func getUserAvailability(
 			Label: "Can't",
 		}, func(i *discordgo.InteractionCreate) {
 			userAvailability[i.Member.User.ID] = []time.Time{}
-			message, respErr = sendUserAvailabilityResponse(dg, state, client, i, message, userAvailability, formData.Game)
+			message, respErr = sendUserAvailabilityResponse(dg, state, client, i, message, userAvailability, formData)
 			if respErr != nil {
 				log.Println("error sending user availability response", respErr)
 			}
@@ -201,6 +222,12 @@ func getUserAvailability(
 	content, err := getUserAvailabilityContent(dg, state, client, initialInteraction, formData)
 	if err != nil {
 		log.Println("error generating content for user availability message", err)
+	}
+
+	if formData.StartTime.Weekday() == time.Now().Weekday() {
+		content += "\n## Availability Today:"
+	} else {
+		content += "\n## Availability" + formData.StartTime.Weekday().String() + ":"
 	}
 
 	dg.ChannelMessageSendComplex(formData.ChannelID, &discordgo.MessageSend{
@@ -237,10 +264,24 @@ func getUserAvailabilityContent(dg DiscordSession, state *State, client *openai.
 	return response, nil
 }
 
-func sendUserAvailabilityResponse(dg DiscordSession, state *State, client *openai.Client, i *discordgo.InteractionCreate, message *discordgo.Message, userAvailability map[string][]time.Time, activityName string) (*discordgo.Message, error) {
+func sendUserAvailabilityResponse(
+	dg DiscordSession,
+	state *State,
+	client *openai.Client,
+	i *discordgo.InteractionCreate,
+	message *discordgo.Message,
+	userAvailability map[string][]time.Time,
+	formData *WhensGoodForm,
+) (*discordgo.Message, error) {
 	commonTimes, userTimeMap := findCommonTimes(userAvailability, 3)
 
+	title := "Today"
+	if formData.StartTime.Weekday() != time.Now().Weekday() {
+		title = formData.StartTime.Weekday().String()
+	}
+
 	messageEmbed := &discordgo.MessageEmbed{
+		Title:  title,
 		Fields: getUserAvailabilityFields(userAvailability, commonTimes),
 	}
 
@@ -261,7 +302,7 @@ func sendUserAvailabilityResponse(dg DiscordSession, state *State, client *opena
 		buttons = append(buttons, state.componentHandler.WithSubmitButton(discordgo.Button{
 			Label: fmt.Sprintf("Create event for %s🚀", t.Format("3:04 PM MST")),
 		}, func(i *discordgo.InteractionCreate) {
-			generateAndScheduleEvent(dg, state, client, i, activityName, userTimeMap[t], t)
+			generateAndScheduleEvent(dg, state, client, i, formData.Game, userTimeMap[t], t)
 		}))
 	}
 
@@ -283,6 +324,10 @@ func sendUserAvailabilityResponse(dg DiscordSession, state *State, client *opena
 }
 
 func generateAndScheduleEvent(dg DiscordSession, state *State, client *openai.Client, i *discordgo.InteractionCreate, activityName string, availableUserIDs []string, t time.Time) {
+	if t.Before(time.Now()) {
+		t = time.Now().Add(5 * time.Minute)
+	}
+
 	content := fmt.Sprintf("activity: %s\n time: %s\n users: ", activityName, t.Format("3:04 PM"))
 	for _, userID := range availableUserIDs {
 		content += UserMention(userID)
@@ -305,6 +350,7 @@ func generateAndScheduleEvent(dg DiscordSession, state *State, client *openai.Cl
 		dg.ChannelMessageSend(i.ChannelID, ERROR_RESPONSE)
 		return
 	}
+
 	if event, err := scheduleEvent(dg, i.GuildID, eventFuncArgs.Name, eventFuncArgs.Description, t); err != nil {
 		log.Println("unabled to schedule event", err)
 		dg.ChannelMessageSend(i.ChannelID, ERROR_RESPONSE)
@@ -338,7 +384,7 @@ func getUserAvailabilityFields(userAvailability map[string][]time.Time, commonTi
 		}
 
 		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:   " ",
+			Name:   " ", // space is needed because this field can't be blank
 			Value:  content,
 			Inline: true,
 		})
@@ -349,21 +395,31 @@ func getUserAvailabilityFields(userAvailability map[string][]time.Time, commonTi
 
 func findCommonTimes(userAvailability map[string][]time.Time, topN int) ([]time.Time, map[time.Time][]string) {
 	timeMap := make(map[time.Time][]string)
-	var timeList []time.Time
 	for userID, timeSlots := range userAvailability {
 		for _, timeSlot := range timeSlots {
 			timeMap[timeSlot] = append(timeMap[timeSlot], userID)
-			timeList = append(timeList, timeSlot)
 		}
+	}
+
+	var timeList []time.Time
+	for timeSlot := range timeMap {
+		timeList = append(timeList, timeSlot)
 	}
 
 	sort.Slice(timeList, func(i, j int) bool {
 		return len(timeMap[timeList[i]]) > len(timeMap[timeList[j]])
 	})
-	topTimes := timeList
-	if len(topTimes) > topN {
-		topTimes = topTimes[:topN]
+
+	topTimes := []time.Time{}
+	for i, t := range timeList {
+		if i >= topN {
+			break
+		}
+		if len(timeMap[timeList[i]]) > 1 {
+			topTimes = append(topTimes, t)
+		}
 	}
+
 	commonTimes := make(map[time.Time][]string)
 	for _, t := range topTimes {
 		commonTimes[t] = timeMap[t]
@@ -389,15 +445,53 @@ func getTimeOptions(d time.Duration) []discordgo.SelectMenuOption {
 	return timeOptions
 }
 
-func makeTimeSelectInstructions(formData *WhensGoodForm, i *discordgo.InteractionCreate) string {
-	users := i.Member.User.Mention()
-	for _, userID := range formData.UserIDS {
-		users += fmt.Sprintf(",%s", UserMention(userID))
+// TODO: timezone
+func getDateOptions() []discordgo.SelectMenuOption {
+	t := time.Now()
+	dateOptions := []discordgo.SelectMenuOption{
+		{
+			Label:   "Today",
+			Value:   t.Format(time.RFC3339),
+			Default: true,
+		},
 	}
 
-	return fmt.Sprintf(`you are generating a the message content in an interactive discord message for. 
-		Asking %s when is a good time for %s. Generate just the content in your response, but be descriptive about the activity and snarky to the users. Do not include the current time.`,
+	for i := 1; i < 7; i++ {
+		t = t.Add(24 * time.Hour)
+		option := discordgo.SelectMenuOption{
+			Label: t.Weekday().String(),
+			Value: t.Format(time.RFC3339),
+		}
+
+		dateOptions = append(dateOptions, option)
+	}
+
+	return dateOptions
+}
+
+func makeTimeSelectInstructions(formData *WhensGoodForm, i *discordgo.InteractionCreate) string {
+	var users string
+	for _, userID := range formData.UserIDS {
+		if userID != i.Member.User.ID {
+			users += fmt.Sprintf(",%s", UserMention(userID))
+		}
+	}
+	if len(formData.UserIDS) == 0 {
+		users = "anyone"
+	}
+	day := "Today"
+	if formData.StartTime.Weekday() != time.Now().Weekday() {
+		day = formData.StartTime.Weekday().String()
+	}
+	return fmt.Sprintf(`you are generating a the message content in an interactive discord message. 
+		%s is asking %s when is a good time for %s on %s. Generate just the content in your response, but be descriptive about the activity and snarky to the users. Do not include the current time.`,
+		i.Member.User.Mention(),
 		users,
 		formData.Game,
+		day,
 	)
+}
+
+func combineDateTime(date, timeVal time.Time) time.Time {
+	return time.Date(date.Year(), date.Month(), date.Day(), timeVal.Hour(), timeVal.Minute(), 0, 0, timeVal.Location())
 }
