@@ -10,9 +10,13 @@ type DiscordSession interface {
 		channelID, content string,
 		options ...discordgo.RequestOption,
 	) (*discordgo.Message, error)
+	ChannelMessageSendComplex(channelID string, data *discordgo.MessageSend, options ...discordgo.RequestOption) (st *discordgo.Message, err error)
+	ChannelMessageSendEmbed(channelID string, embed *discordgo.MessageEmbed, options ...discordgo.RequestOption) (*discordgo.Message, error)
 
 	// see discordgo.Session.ChannelTyping()
 	ChannelTyping(channelID string, options ...discordgo.RequestOption) error
+	ChannelMessageEditEmbed(channelID string, messageID string, embed *discordgo.MessageEmbed, options ...discordgo.RequestOption) (*discordgo.Message, error)
+	ChannelMessageEditComplex(m *discordgo.MessageEdit, options ...discordgo.RequestOption) (st *discordgo.Message, err error)
 
 	// see discordgo.Session.GuildMember()
 	GuildMember(
@@ -29,7 +33,12 @@ type DiscordSession interface {
 	) error
 
 	UserChannelCreate(recipientID string, options ...discordgo.RequestOption) (*discordgo.Channel, error)
+	GuildMembers(guildID string, after string, limit int, options ...discordgo.RequestOption) ([]*discordgo.Member, error)
+	GuildScheduledEventCreate(guildID string, event *discordgo.GuildScheduledEventParams, options ...discordgo.RequestOption) (st *discordgo.GuildScheduledEvent, err error)
+	GuildChannels(guildID string, options ...discordgo.RequestOption) (st []*discordgo.Channel, err error)
 
+	AddHandler(handler interface{}) func()
+	InteractionResponseEdit(interaction *discordgo.Interaction, newresp *discordgo.WebhookEdit, options ...discordgo.RequestOption) (*discordgo.Message, error)
 	// wraps discordgo.Session.State
 	GetState() *discordgo.State
 }

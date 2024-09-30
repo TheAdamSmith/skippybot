@@ -18,6 +18,7 @@ const (
 	ALWAYS_RESPOND    = "always_respond"
 	SEND_MESSAGE      = "send_message"
 	GAME_STATS        = "game_stats"
+	WHENS_GOOD        = "whens_good"
 	TRACK_GAME_USEAGE = "track_game_usage"
 	CHANNEL           = "channel"
 	MESSAGE           = "message"
@@ -26,146 +27,110 @@ const (
 	DAILY_LIMIT       = "daily_limit"
 	DAYS              = "days"
 	START_OR_STOP     = "startorstop"
+	GAME              = "game"
 )
 
 func initSlashCommands(
 	dg *discordgo.Session,
 ) ([]*discordgo.ApplicationCommand, error) {
-	var commands []*discordgo.ApplicationCommand
-	command := discordgo.ApplicationCommand{
-		Name:        TRACK_GAME_USEAGE,
-		Description: "enable game tracking.",
-		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Type:        discordgo.ApplicationCommandOptionBoolean,
-				Name:        ENABLE,
-				Description: "enable/disable game tracking",
-				Required:    true,
+	commands := []*discordgo.ApplicationCommand{
+		{
+			Name:        TRACK_GAME_USEAGE,
+			Description: "enable game tracking.",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionBoolean,
+					Name:        ENABLE,
+					Description: "enable/disable game tracking",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionNumber,
+					Name:        DAILY_LIMIT,
+					Description: "Daily game limit in hours. Defaults to no limit",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionChannel,
+					Name:        CHANNEL,
+					Description: "Channel to send the reminder on. Defaults to a DM",
+					Required:    false,
+				},
 			},
-			{
-				Type:        discordgo.ApplicationCommandOptionNumber,
-				Name:        DAILY_LIMIT,
-				Description: "Daily game limit in hours. Defaults to no limit",
-				Required:    false,
+		},
+		{
+			Name:        SEND_MESSAGE,
+			Description: "Have the bot send a message",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionChannel,
+					Name:        CHANNEL,
+					Description: "channel to send message on",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        MESSAGE,
+					Description: "message to send",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionMentionable,
+					Name:        MENTION,
+					Description: "anyone to mention",
+					Required:    false,
+				},
 			},
-			{
-				Type:        discordgo.ApplicationCommandOptionChannel,
-				Name:        CHANNEL,
-				Description: "Channel to send the reminder on. Defaults to a DM",
-				Required:    false,
+		},
+		{
+			Name:        ALWAYS_RESPOND,
+			Description: "Toggle auto respond when on Skippy will always respond to messages in this channel",
+		},
+		{
+			Name:        GAME_STATS,
+			Description: "Get your game stats",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        DAYS,
+					Description: "Number of days to get stats for. Defaults to today.",
+					Required:    false,
+				},
+			},
+		},
+		{
+			Name:        RL_SESH,
+			Description: "start/stop rl sesh",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        START_OR_STOP,
+					Description: "should be either start or stop",
+					Required:    false,
+				},
+			},
+		},
+		{
+			Name:        WHENS_GOOD,
+			Description: "found out whens good",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        GAME,
+					Description: "for what game",
+					Required:    false,
+				},
 			},
 		},
 	}
 
-	applicationCommand, err := dg.ApplicationCommandCreate(
-		dg.State.User.ID,
-		"",
-		&command,
-	)
-	if err != nil {
-		log.Println("error creating application command: ", err)
-	}
-	commands = append(commands, applicationCommand)
-
-	command = discordgo.ApplicationCommand{
-		Name:        SEND_MESSAGE,
-		Description: "Have the bot send a message",
-		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Type:        discordgo.ApplicationCommandOptionChannel,
-				Name:        CHANNEL,
-				Description: "channel to send message on",
-				Required:    true,
-			},
-			{
-				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        MESSAGE,
-				Description: "message to send",
-				Required:    true,
-			},
-			{
-				Type:        discordgo.ApplicationCommandOptionMentionable,
-				Name:        MENTION,
-				Description: "anyone to mention",
-				Required:    false,
-			},
-		},
+	for _, command := range commands {
+		if _, err := dg.ApplicationCommandCreate(dg.State.User.ID, "", command); err != nil {
+			return nil, fmt.Errorf("error unable to create command %w", err)
+		}
 	}
 
-	applicationCommand, err = dg.ApplicationCommandCreate(
-		dg.State.User.ID,
-		"",
-		&command,
-	)
-	commands = append(commands, applicationCommand)
-
-	if err != nil {
-		log.Println("error creating application command: ", err)
-	}
-
-	command = discordgo.ApplicationCommand{
-		Name:        ALWAYS_RESPOND,
-		Description: "Toggle auto respond when on Skippy will always respond to messages in this channel",
-	}
-
-	applicationCommand, err = dg.ApplicationCommandCreate(
-		dg.State.User.ID,
-		"",
-		&command,
-	)
-	commands = append(commands, applicationCommand)
-
-	if err != nil {
-		log.Println("error creating application command: ", err)
-	}
-
-	command = discordgo.ApplicationCommand{
-		Name:        GAME_STATS,
-		Description: "Get your game stats",
-		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Type:        discordgo.ApplicationCommandOptionInteger,
-				Name:        DAYS,
-				Description: "Number of days to get stats for. Defaults to today.",
-				Required:    false,
-			},
-		},
-	}
-
-	applicationCommand, err = dg.ApplicationCommandCreate(
-		dg.State.User.ID,
-		"",
-		&command,
-	)
-	commands = append(commands, applicationCommand)
-
-	if err != nil {
-		log.Println("error creating application command: ", err)
-	}
-	command = discordgo.ApplicationCommand{
-		Name:        RL_SESH,
-		Description: "start/stop rl sesh",
-		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        START_OR_STOP,
-				Description: "should be either start or stop",
-				Required:    false,
-			},
-		},
-	}
-
-	applicationCommand, err = dg.ApplicationCommandCreate(
-		dg.State.User.ID,
-		"",
-		&command,
-	)
-	commands = append(commands, applicationCommand)
-	if err != nil {
-		log.Println("error creating application command: ", err)
-	}
-
-	return commands, err
+	return commands, nil
 }
 
 func onCommand(
@@ -193,6 +158,10 @@ func onCommand(
 		}
 	case GAME_STATS:
 		if err := generateGameStats(dg, i, client, state, db); err != nil {
+			handleSlashCommandError(dg, i, err)
+		}
+	case WHENS_GOOD:
+		if err := handleWhensGood(dg, i, state, client); err != nil {
 			handleSlashCommandError(dg, i, err)
 		}
 	default:
@@ -238,11 +207,11 @@ func generateGameStats(
 	db Database,
 ) error {
 	daysAgo := 0
-	optionValue, exists := findCommandOption(
+	optionValue, ok := findCommandOption(
 		i.ApplicationCommandData().Options,
 		DAYS,
 	)
-	if exists {
+	if ok {
 		daysAgo = int(optionValue.IntValue())
 	}
 
@@ -306,28 +275,28 @@ func toggleGameTracking(
 	var remind bool
 	var dailyLimit time.Duration
 	var channelID string
-	optionValue, exists := findCommandOption(
+	optionValue, ok := findCommandOption(
 		i.ApplicationCommandData().Options,
 		ENABLE,
 	)
-	if exists {
+	if ok {
 		enable = optionValue.BoolValue()
 	}
 
-	optionValue, exists = findCommandOption(
+	optionValue, ok = findCommandOption(
 		i.ApplicationCommandData().Options,
 		DAILY_LIMIT,
 	)
-	if exists {
+	if ok {
 		remind = true
 		dailyLimit = time.Duration(optionValue.FloatValue() * float64(time.Hour))
 	}
 
-	optionValue, exists = findCommandOption(
+	optionValue, ok = findCommandOption(
 		i.ApplicationCommandData().Options,
 		CHANNEL,
 	)
-	if exists {
+	if ok {
 		channelID = optionValue.ChannelValue(nil).ID
 	}
 
@@ -379,22 +348,22 @@ func sendChannelMessage(
 	client *openai.Client,
 	state *State,
 ) error {
-	optionValue, exists := findCommandOption(
+	optionValue, ok := findCommandOption(
 		i.ApplicationCommandData().Options,
 		CHANNEL,
 	)
-	if !exists {
+	if !ok {
 		return fmt.Errorf("unable to find slash command option %s", CHANNEL)
 	}
 
 	channel := optionValue.ChannelValue(nil)
 	channelID := channel.ID
 
-	optionValue, exists = findCommandOption(
+	optionValue, ok = findCommandOption(
 		i.ApplicationCommandData().Options,
 		MESSAGE,
 	)
-	if !exists {
+	if !ok {
 		return fmt.Errorf("unable to find slash command option %s", MESSAGE)
 	}
 
@@ -403,11 +372,11 @@ func sendChannelMessage(
 	var mentionString string
 
 	// this one is optional
-	optionValue, exists = findCommandOption(
+	optionValue, ok = findCommandOption(
 		i.ApplicationCommandData().Options,
 		MENTION,
 	)
-	if exists {
+	if ok {
 		guild, err := dg.GetState().Guild(i.GuildID)
 		if err != nil {
 			log.Println("Could not get guild", err)
@@ -463,6 +432,23 @@ func sendChannelMessage(
 	return nil
 }
 
+func handleWhensGood(
+	dg DiscordSession,
+	i *discordgo.InteractionCreate,
+	state *State,
+	client *openai.Client,
+) error {
+	whensGoodResponse := generateWhensGoodResponse(dg, state, client, i)
+
+	err := dg.InteractionRespond(i.Interaction,
+		&discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: whensGoodResponse,
+		})
+
+	return err
+}
+
 func handleAlwaysRespond(
 	dg DiscordSession,
 	i *discordgo.InteractionCreate,
@@ -495,11 +481,11 @@ func handleRLSesh(
 	state *State,
 	config *Config,
 ) error {
-	optionValue, exists := findCommandOption(
+	optionValue, ok := findCommandOption(
 		i.ApplicationCommandData().Options,
 		START_OR_STOP,
 	)
-	if !exists {
+	if !ok {
 		return fmt.Errorf("unable to find slash command option")
 	}
 
@@ -544,8 +530,8 @@ func handleRLSesh(
 	if textOption == "stop" {
 
 		var message string
-		thread, exists := state.GetThread(i.ChannelID)
-		if !exists {
+		thread, ok := state.GetThread(i.ChannelID)
+		if !ok {
 			message = "unable to stop session no thread found"
 		}
 		cancelFunc := thread.cancelFunc
