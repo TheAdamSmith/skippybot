@@ -14,9 +14,11 @@ func scheduleEvent(dg DiscordSession, guildID string, name string, description s
 		log.Println("could not get top voice channel: ", err)
 		return nil, err
 	}
+
 	if name == "" {
 		name = "Chillin"
 	}
+
 	return dg.GuildScheduledEventCreate(guildID, &discordgo.GuildScheduledEventParams{
 		Name:               name,
 		Description:        description,
@@ -32,13 +34,11 @@ func getTopVoiceChannel(dg DiscordSession, guildID string) (*discordgo.Channel, 
 	if err != nil {
 		return nil, err
 	}
-	// Find the top (highest positioned) voice channel
+
 	var topVoiceChannel *discordgo.Channel
 	for _, channel := range channels {
-		// Check if the channel is a voice channel
 		if channel.Type == discordgo.ChannelTypeGuildVoice {
-			// If no top voice channel is set yet or the current channel has a higher position, set it
-			if topVoiceChannel == nil || channel.Position > topVoiceChannel.Position {
+			if topVoiceChannel == nil || channel.Position < topVoiceChannel.Position && canAccessVoiceChannel(dg, channel.ID) {
 				topVoiceChannel = channel
 			}
 		}
@@ -47,4 +47,17 @@ func getTopVoiceChannel(dg DiscordSession, guildID string) (*discordgo.Channel, 
 		return nil, fmt.Errorf("unable to find voice channel")
 	}
 	return topVoiceChannel, nil
+}
+
+func canAccessVoiceChannel(dg DiscordSession, channelID string) bool {
+	permissions, err := dg.UserChannelPermissions(dg.GetState().User.ID, channelID)
+	if err != nil {
+		log.Println("error getting channel permissions", err)
+		return false
+	}
+
+	if permissions&discordgo.PermissionVoiceConnect != 0 && permissions&discordgo.PermissionVoiceSpeak != 0 {
+		return true
+	}
+	return false
 }
