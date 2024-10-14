@@ -185,7 +185,7 @@ func onCommand(
 			handleSlashCommandError(dg, i, err)
 		}
 	case JOIN:
-		if err := handleJoin(dg, i, state); err != nil {
+		if err := handleJoin(dg, i, client, state); err != nil {
 			handleSlashCommandError(dg, i, err)
 		}
 	case LEAVE:
@@ -527,8 +527,8 @@ func handleHelp(dg DiscordSession, i *discordgo.InteractionCreate) error {
 	return nil
 }
 
-func handleJoin(dg DiscordSession, i *discordgo.InteractionCreate, state *State) error {
-	if err := joinVoice(dg, i.GuildID, i.Member.User.ID, state); err != nil {
+func handleJoin(dg DiscordSession, i *discordgo.InteractionCreate, client *openai.Client, state *State) error {
+	if err := joinVoice(dg, i.GuildID, i.Member.User.ID, i.ChannelID, client, state); err != nil {
 		return err
 	}
 
