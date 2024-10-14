@@ -495,6 +495,17 @@ func handleHelp(dg DiscordSession, i *discordgo.InteractionCreate) error {
 		return err
 	}
 
+	err := dg.InteractionRespond(i.Interaction,
+		&discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "Help is on the way!",
+			},
+		})
+	if err != nil {
+		log.Printf("Error responding to slash command: %s\n", err)
+	}
+
 	return nil
 }
 
