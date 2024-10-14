@@ -7,6 +7,7 @@ import (
 	"skippybot/components"
 	"sync"
 
+	"github.com/bwmarrin/discordgo"
 	openai "github.com/sashabaranov/go-openai"
 )
 
@@ -14,6 +15,7 @@ import (
 type State struct {
 	threadMap        map[string]*ChatThread
 	userPresenceMap  map[string]UserPresence
+	voiceChannelMap  map[string]*discordgo.VoiceConnection
 	componentHandler *components.ComponentHandler
 	assistantID      string
 	mu               sync.RWMutex
@@ -49,6 +51,7 @@ func NewState(
 	return &State{
 		threadMap:        make(map[string]*ChatThread),
 		userPresenceMap:  make(map[string]UserPresence),
+		voiceChannelMap:  make(map[string]*discordgo.VoiceConnection),
 		componentHandler: components.NewComponentHandler(componentClient),
 		assistantID:      assistantID,
 		discordToken:     discordToken,
@@ -223,6 +226,24 @@ func (s *State) GetComponentHandler() *components.ComponentHandler {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.componentHandler
+}
+
+func (s *State) AddVoiceConnection(channelID string, vc *discordgo.VoiceConnection) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.voiceChannelMap[channelID] = vc
+}
+
+func (s *State) RemoveVoiceConnection(channelID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.voiceChannelMap, channelID)
+}
+
+func (s *State) GetVoiceConnection(channelID string) *discordgo.VoiceConnection {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.voiceChannelMap[channelID]
 }
 
 func (s *State) GetDiscordToken() string {

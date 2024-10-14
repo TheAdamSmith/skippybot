@@ -21,6 +21,8 @@ const (
 	WHENS_GOOD        = "whens_good"
 	TRACK_GAME_USEAGE = "track_game_usage"
 	HELP              = "help"
+	JOIN              = "join"
+	LEAVE             = "leave"
 	CHANNEL           = "channel"
 	MESSAGE           = "message"
 	MENTION           = "mention"
@@ -128,6 +130,14 @@ func initSlashCommands(
 			Name:        HELP,
 			Description: "see what Skippy can do",
 		},
+		{
+			Name:        JOIN,
+			Description: "Have Skippy join your voice channel",
+		},
+		{
+			Name:        LEAVE,
+			Description: "Have Skippy leave the voice channel",
+		},
 	}
 
 	for _, command := range commands {
@@ -172,6 +182,14 @@ func onCommand(
 		}
 	case HELP:
 		if err := handleHelp(dg, i); err != nil {
+			handleSlashCommandError(dg, i, err)
+		}
+	case JOIN:
+		if err := handleJoin(dg, i, state); err != nil {
+			handleSlashCommandError(dg, i, err)
+		}
+	case LEAVE:
+		if err := handleLeave(dg, i, state); err != nil {
 			handleSlashCommandError(dg, i, err)
 		}
 	default:
@@ -500,6 +518,43 @@ func handleHelp(dg DiscordSession, i *discordgo.InteractionCreate) error {
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
 				Content: "Help is on the way!",
+			},
+		})
+	if err != nil {
+		log.Printf("Error responding to slash command: %s\n", err)
+	}
+
+	return nil
+}
+
+func handleJoin(dg DiscordSession, i *discordgo.InteractionCreate, state *State) error {
+	if err := joinVoice(dg, i.GuildID, i.Member.User.ID, state); err != nil {
+		return err
+	}
+
+	err := dg.InteractionRespond(i.Interaction,
+		&discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "Joining!",
+			},
+		})
+	if err != nil {
+		log.Printf("Error responding to slash command: %s\n", err)
+	}
+	return nil
+}
+
+func handleLeave(dg DiscordSession, i *discordgo.InteractionCreate, state *State) error {
+	if err := leaveVoice(dg, i.GuildID, i.Member.User.ID, state); err != nil {
+		return err
+	}
+
+	err := dg.InteractionRespond(i.Interaction,
+		&discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "Leaving!",
 			},
 		})
 	if err != nil {
