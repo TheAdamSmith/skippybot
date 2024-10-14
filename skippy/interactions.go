@@ -20,6 +20,7 @@ const (
 	GAME_STATS        = "game_stats"
 	WHENS_GOOD        = "whens_good"
 	TRACK_GAME_USEAGE = "track_game_usage"
+	HELP              = "help"
 	CHANNEL           = "channel"
 	MESSAGE           = "message"
 	MENTION           = "mention"
@@ -98,18 +99,19 @@ func initSlashCommands(
 				},
 			},
 		},
-		{
-			Name:        RL_SESH,
-			Description: "start/stop rl sesh",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        START_OR_STOP,
-					Description: "should be either start or stop",
-					Required:    false,
-				},
-			},
-		},
+		// TODO: should prob remove?
+		// {
+		// 	Name:        RL_SESH,
+		// 	Description: "start/stop rl sesh",
+		// 	Options: []*discordgo.ApplicationCommandOption{
+		// 		{
+		// 			Type:        discordgo.ApplicationCommandOptionString,
+		// 			Name:        START_OR_STOP,
+		// 			Description: "should be either start or stop",
+		// 			Required:    false,
+		// 		},
+		// 	},
+		// },
 		{
 			Name:        WHENS_GOOD,
 			Description: "found out whens good",
@@ -121,6 +123,10 @@ func initSlashCommands(
 					Required:    false,
 				},
 			},
+		},
+		{
+			Name:        HELP,
+			Description: "see what Skippy can do",
 		},
 	}
 
@@ -162,6 +168,10 @@ func onCommand(
 		}
 	case WHENS_GOOD:
 		if err := handleWhensGood(dg, i, state, client); err != nil {
+			handleSlashCommandError(dg, i, err)
+		}
+	case HELP:
+		if err := handleHelp(dg, i); err != nil {
 			handleSlashCommandError(dg, i, err)
 		}
 	default:
@@ -472,6 +482,20 @@ func handleAlwaysRespond(
 	if err != nil {
 		log.Printf("Error responding to slash command: %s\n", err)
 	}
+}
+
+func handleHelp(dg DiscordSession, i *discordgo.InteractionCreate) error {
+	if err := sendChunkedChannelMessage(dg, i.ChannelID, GENERAL_HELP); err != nil {
+		return err
+	}
+	if err := sendChunkedChannelMessage(dg, i.ChannelID, AI_FUNCTIONS_HELP); err != nil {
+		return err
+	}
+	if err := sendChunkedChannelMessage(dg, i.ChannelID, COMMANDS_HELP); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func handleRLSesh(
