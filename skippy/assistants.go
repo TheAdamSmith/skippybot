@@ -62,6 +62,8 @@ type EventFuncArgs struct {
 	NotificationMessage string `json:"notification_message"`
 }
 
+// TODO: update
+// TODO: these functions feel like they should exist on skippy struct, but I guess it doesn't matter
 // Gets a response from the ai.
 //
 // Sends message to thread, generates and executes a run.
@@ -70,30 +72,24 @@ type EventFuncArgs struct {
 // Will handle functions calls otherwise
 func GetResponse(
 	ctx context.Context,
-	dg DiscordSession,
 	dgChannID string,
 	messageReq openai.MessageRequest,
 	additionalInstructions string,
 	disableFunctions bool,
-	client *openai.Client,
-	state *State,
-	// nullable if disableFunctions is true
-	scheduler *Scheduler,
-	// nullable if disableFunctions is true
-	config *Config,
+	s *Skippy,
 ) (string, error) {
-	assistantID := state.GetAssistantID()
+	assistantID := s.Config.AssistantID
 
-	thread, err := state.GetOrCreateThread(dgChannID, client)
+	thread, err := s.State.GetOrCreateThread(dgChannID, s.AIClient)
 	if err != nil {
 		return "", err
 	}
 
 	// lock the thread because we can't queue additional messages during a run
-	state.LockThread(dgChannID)
-	defer state.UnLockThread(dgChannID)
+	s.State.LockThread(dgChannID)
+	defer s.State.UnLockThread(dgChannID)
 
-	_, err = client.CreateMessage(ctx, thread.openAIThread.ID, messageReq)
+	_, err = s.AIClient.CreateMessage(ctx, thread.openAIThread.ID, messageReq)
 	if err != nil {
 		log.Println("Unable to create message", err)
 		return "", err
@@ -102,14 +98,14 @@ func GetResponse(
 	runReq := openai.RunRequest{
 		AssistantID:            assistantID,
 		AdditionalInstructions: additionalInstructions,
-		Model:                  state.openAIModel,
+		Model:                  s.Config.DefaultModel,
 	}
 
 	if disableFunctions {
 		runReq.ToolChoice = "none"
 	}
 
-	run, err := client.CreateRun(ctx, thread.openAIThread.ID, runReq)
+	run, err := s.AIClient.CreateRun(ctx, thread.openAIThread.ID, runReq)
 	if err != nil {
 		log.Println("Unable to create run:", err)
 		return "", err
@@ -121,8 +117,8 @@ func GetResponse(
 	runDelay := 1
 	prevStatus := run.Status
 	for {
-		dg.ChannelTyping(dgChannID)
-		run, err = client.RetrieveRun(ctx, run.ThreadID, run.ID)
+		s.DiscordSession.ChannelTyping(dgChannID)
+		run, err = s.AIClient.RetrieveRun(ctx, run.ThreadID, run.ID)
 		if err != nil {
 			log.Println("error retrieving run: ", err)
 		}
@@ -145,7 +141,7 @@ func GetResponse(
 			return "", fmt.Errorf(errorMsg)
 		case openai.RunStatusCompleted:
 			log.Println("Usage: ", run.Usage.TotalTokens)
-			messageList, err := client.ListMessage(ctx, thread.openAIThread.ID, nil, nil, nil, nil)
+			messageList, err := s.AIClient.ListMessage(ctx, thread.openAIThread.ID, nil, nil, nil, nil)
 			if err != nil {
 				return "", fmt.Errorf("unable to get messages: %s", err)
 			}
@@ -160,10 +156,7 @@ func GetResponse(
 			return message, nil
 
 		case openai.RunStatusRequiresAction:
-			if disableFunctions || config == nil || scheduler == nil {
-				return "", fmt.Errorf("recieved required action when tools disabled")
-			}
-			run, err = handleRequiresAction(ctx, dg, run, dgChannID, thread.openAIThread.ID, client, state, scheduler, config)
+			run, err = handleRequiresAction(ctx, run, dgChannID, thread.openAIThread.ID, s)
 			if err != nil {
 				return "", err
 			}
@@ -181,26 +174,23 @@ func GetResponse(
 
 func GetToolResponse(
 	ctx context.Context,
-	dg DiscordSession,
 	dgChannID string,
 	messageReq openai.MessageRequest,
 	additionalInstructions string,
 	tool openai.Tool,
-	client *openai.Client,
-	state *State,
+	s *Skippy,
 ) ([]FuncArgs, error) {
-	assistantID := state.GetAssistantID()
-
+	assistantID := s.Config.AssistantID
 	// lock the thread because we can't queue additional messages during a run
-	thread, err := state.GetOrCreateThread(dgChannID, client)
+	thread, err := s.State.GetOrCreateThread(dgChannID, s.AIClient)
 	if err != nil {
 		return []FuncArgs{}, err
 	}
 
-	state.LockThread(dgChannID)
-	defer state.UnLockThread(dgChannID)
+	s.State.LockThread(dgChannID)
+	defer s.State.UnLockThread(dgChannID)
 
-	_, err = client.CreateMessage(ctx, thread.openAIThread.ID, messageReq)
+	_, err = s.AIClient.CreateMessage(ctx, thread.openAIThread.ID, messageReq)
 	if err != nil {
 		log.Println("Unable to create message", err)
 		return []FuncArgs{}, err
@@ -208,7 +198,7 @@ func GetToolResponse(
 	runReq := openai.RunRequest{
 		AssistantID:            assistantID,
 		AdditionalInstructions: additionalInstructions,
-		Model:                  state.openAIModel,
+		Model:                  s.Config.DefaultModel,
 		Tools:                  []openai.Tool{tool},
 		ToolChoice: openai.ToolChoice{
 			Type: openai.ToolTypeFunction,
@@ -218,7 +208,7 @@ func GetToolResponse(
 		},
 	}
 
-	run, err := client.CreateRun(ctx, thread.openAIThread.ID, runReq)
+	run, err := s.AIClient.CreateRun(ctx, thread.openAIThread.ID, runReq)
 	if err != nil {
 		log.Println("Unable to create run:", err)
 		return []FuncArgs{}, err
@@ -230,8 +220,8 @@ func GetToolResponse(
 	runDelay := 1
 	prevStatus := run.Status
 	for {
-		dg.ChannelTyping(dgChannID)
-		run, err = client.RetrieveRun(ctx, run.ThreadID, run.ID)
+		s.DiscordSession.ChannelTyping(dgChannID)
+		run, err = s.AIClient.RetrieveRun(ctx, run.ThreadID, run.ID)
 		if err != nil {
 			log.Println("error retrieving run: ", err)
 		}
@@ -265,7 +255,7 @@ func GetToolResponse(
 					openai.ToolOutput{ToolCallID: funcArg.ToolID, Output: "no-op"},
 				)
 			}
-			submitToolOutputs(client, toolOutputs, thread.openAIThread.ID, run.ID)
+			submitToolOutputs(s.AIClient, toolOutputs, thread.openAIThread.ID, run.ID)
 			return funcArgs, nil
 		default:
 			log.Println("recieved unkown status from openai")
@@ -281,14 +271,10 @@ func GetToolResponse(
 
 func handleRequiresAction(
 	ctx context.Context,
-	dg DiscordSession,
 	run openai.Run,
 	dgChannID string,
 	threadID string,
-	client *openai.Client,
-	state *State,
-	scheduler *Scheduler,
-	config *Config,
+	s *Skippy,
 ) (openai.Run, error) {
 	funcArgs := GetFunctionArgs(run)
 
@@ -302,12 +288,9 @@ outerloop:
 			log.Println("toggle_morning_message()")
 			output, err := handleMorningMessage(
 				ctx,
-				dg,
 				funcArg,
 				dgChannID,
-				client,
-				state,
-				scheduler,
+				s,
 			)
 			if err != nil {
 				log.Println("error handling morning message: ", err)
@@ -319,7 +302,7 @@ outerloop:
 		case GetStockPriceKey:
 			log.Println("get_stock_price()")
 
-			output, err := handleGetStockPrice(funcArg, state)
+			output, err := handleGetStockPrice(funcArg, s.Config.StockAPIKey)
 			if err != nil {
 				log.Println("error handling get_stock_price: ", err)
 			}
@@ -332,7 +315,7 @@ outerloop:
 		case GetWeatherKey:
 			log.Println(GetWeatherKey)
 
-			output, err := handleGetWeather(funcArg, state)
+			output, err := handleGetWeather(funcArg, s)
 			if err != nil {
 				log.Println("error handling get_stock_price: ", err)
 			}
@@ -345,10 +328,9 @@ outerloop:
 			log.Println(GenerateImage)
 			output, err := getAndSendImage(
 				context.Background(),
-				dg,
 				funcArg,
 				dgChannID,
-				client,
+				s,
 			)
 			if err != nil {
 				log.Println("unable to get image: ", err)
@@ -361,13 +343,9 @@ outerloop:
 			log.Println("set_reminder()")
 			output, err := setReminder(
 				context.Background(),
-				dg,
 				funcArg,
 				dgChannID,
-				client,
-				state,
-				scheduler,
-				config,
+				s,
 			)
 			if err != nil {
 				log.Println("error sending channel message: ", err)
@@ -386,13 +364,10 @@ outerloop:
 			)
 		}
 	}
-	return submitToolOutputs(client, toolOutputs, threadID, run.ID)
+	return submitToolOutputs(s.AIClient, toolOutputs, threadID, run.ID)
 }
 
-func handleGetWeather(
-	funcArg FuncArgs,
-	state *State,
-) (string, error) {
+func handleGetWeather(funcArg FuncArgs, s *Skippy) (string, error) {
 	weatherFuncArgs := WeatherFuncArgs{}
 	err := json.Unmarshal([]byte(funcArg.JsonValue), &weatherFuncArgs)
 	if err != nil {
@@ -402,7 +377,7 @@ func handleGetWeather(
 
 	log.Println("getting weather for: ", weatherFuncArgs.Location)
 
-	output, err := getWeather(weatherFuncArgs.Location, state.GetWeatherAPIKey())
+	output, err := getWeather(weatherFuncArgs.Location, s.Config.WeatherAPIKey)
 	if err != nil {
 		log.Println("Unable to get stock price: ", err)
 		return "There was a problem making that api call", err
@@ -411,10 +386,7 @@ func handleGetWeather(
 	return output, nil
 }
 
-func handleGetStockPrice(
-	funcArg FuncArgs,
-	state *State,
-) (string, error) {
+func handleGetStockPrice(funcArg FuncArgs, apiKey string) (string, error) {
 	stockFuncArgs := StockFuncArgs{}
 	err := json.Unmarshal([]byte(funcArg.JsonValue), &stockFuncArgs)
 	if err != nil {
@@ -424,7 +396,7 @@ func handleGetStockPrice(
 
 	log.Println("getting price for: ", stockFuncArgs.Symbol)
 
-	output, err := getStockPrice(stockFuncArgs.Symbol, state.GetStockAPIKey())
+	output, err := getStockPrice(stockFuncArgs.Symbol, apiKey)
 	if err != nil {
 		log.Println("Unable to get stock price: ", err)
 		return "There was a problem making that api call", err
@@ -435,12 +407,9 @@ func handleGetStockPrice(
 
 func handleMorningMessage(
 	ctx context.Context,
-	dg DiscordSession,
 	funcArg FuncArgs,
 	dgChannID string,
-	client *openai.Client,
-	state *State,
-	scheduler *Scheduler,
+	s *Skippy,
 ) (string, error) {
 	morningMsgFuncArgs := MorningMsgFuncArgs{}
 	err := json.Unmarshal([]byte(funcArg.JsonValue), &morningMsgFuncArgs)
@@ -451,12 +420,9 @@ func handleMorningMessage(
 
 	output := toggleMorningMsg(
 		ctx,
-		dg,
 		morningMsgFuncArgs,
 		dgChannID,
-		client,
-		state,
-		scheduler,
+		s,
 	)
 
 	return output, nil
@@ -464,10 +430,9 @@ func handleMorningMessage(
 
 func getAndSendImage(
 	ctx context.Context,
-	dg DiscordSession,
 	funcArg FuncArgs,
 	channelID string,
-	client *openai.Client,
+	s *Skippy,
 ) (string, error) {
 	generateImageFuncArgs := GenerateImageFuncArgs{}
 	err := json.Unmarshal([]byte(funcArg.JsonValue), &generateImageFuncArgs)
@@ -476,26 +441,22 @@ func getAndSendImage(
 		return "Unable to deserialize data", nil
 	}
 
-	imgUrl, err := GetImgUrl(generateImageFuncArgs.Prompt, client)
+	imgUrl, err := GetImgUrl(generateImageFuncArgs.Prompt, s.AIClient)
 	if err != nil {
 		log.Println("unable to generate images", err)
 		return "Unable to generate image", err
 	}
 
 	log.Printf("recieved image url (%s) attempting to send on channel %s\n", imgUrl, channelID)
-	err = sendChunkedChannelMessage(dg, channelID, imgUrl)
+	err = sendChunkedChannelMessage(s.DiscordSession, channelID, imgUrl)
 	return "image generated", err
 }
 
 func setReminder(
 	ctx context.Context,
-	dg DiscordSession,
 	funcArg FuncArgs,
 	channelID string,
-	client *openai.Client,
-	state *State,
-	scheduler *Scheduler,
-	config *Config,
+	s *Skippy,
 ) (string, error) {
 	var channelMsg ReminderFuncArgs
 
@@ -513,21 +474,19 @@ func setReminder(
 		duration,
 	)
 
-	scheduler.AddReminderJob(
+	s.Scheduler.AddReminderJob(
 		channelID,
 		duration,
 		func() {
-			sendChunkedChannelMessage(dg, channelID, channelMsg.Message)
-			state.SetAwaitsResponse(channelID, true, client)
-			for _, duration := range config.ReminderDurations {
-				scheduler.AddReminderJob(channelID, duration, func() {
+			sendChunkedChannelMessage(s.DiscordSession, channelID, channelMsg.Message)
+			s.State.SetAwaitsResponse(channelID, true, s.AIClient)
+			for _, duration := range s.Config.ReminderDurations {
+				s.Scheduler.AddReminderJob(channelID, duration, func() {
 					sendAdditionalReminder(
 						ctx,
-						dg,
 						channelID,
 						channelMsg.UserID,
-						client,
-						state,
+						s,
 					)
 				})
 			}
@@ -539,11 +498,9 @@ func setReminder(
 
 func sendAdditionalReminder(
 	ctx context.Context,
-	dg DiscordSession,
 	channelID string,
 	userID string,
-	client *openai.Client,
-	state *State,
+	s *Skippy,
 ) {
 	log.Println("sending another reminder")
 
@@ -565,12 +522,10 @@ func sendAdditionalReminder(
 
 	getAndSendResponseWithoutTools(
 		ctx,
-		dg,
 		channelID,
 		messageReq,
 		DEFAULT_INSTRUCTIONS,
-		client,
-		state,
+		s,
 	)
 }
 
@@ -583,15 +538,12 @@ func UserMention(userID string) string {
 
 func toggleMorningMsg(
 	ctx context.Context,
-	dg DiscordSession,
 	morningMsgFuncArgs MorningMsgFuncArgs,
 	channelID string,
-	client *openai.Client,
-	state *State,
-	scheduler *Scheduler,
+	s *Skippy,
 ) string {
 	if !morningMsgFuncArgs.Enable {
-		scheduler.CancelMorningMsgJob(channelID)
+		s.Scheduler.CancelMorningMsgJob(channelID)
 		return "worked"
 	}
 
@@ -611,17 +563,17 @@ func toggleMorningMsg(
 
 	}
 
-	if scheduler.HasMorningMsgJob(channelID) {
-		scheduler.CancelMorningMsgJob(channelID)
+	if s.Scheduler.HasMorningMsgJob(channelID) {
+		s.Scheduler.CancelMorningMsgJob(channelID)
 	}
 
 	log.Println("Setting the Morning Msg for: ", givenTime)
 
-	scheduler.AddMorningMsgJob(
+	s.Scheduler.AddMorningMsgJob(
 		channelID,
 		givenTime,
 		func() {
-			sendMorningMsg(ctx, dg, morningMsgFuncArgs, channelID, client, state)
+			sendMorningMsg(ctx, morningMsgFuncArgs, channelID, s)
 		},
 	)
 
@@ -630,15 +582,13 @@ func toggleMorningMsg(
 
 func sendMorningMsg(
 	ctx context.Context,
-	dg DiscordSession,
 	morningMsgFuncArgs MorningMsgFuncArgs,
 	channelID string,
-	client *openai.Client,
-	state *State,
+	s *Skippy,
 ) {
 	message := "Please tell everyone @here good morning."
 	for _, location := range morningMsgFuncArgs.WeatherLocations {
-		weather, err := getWeather(location, state.GetWeatherAPIKey())
+		weather, err := getWeather(location, s.Config.WeatherAPIKey)
 		if err != nil {
 			log.Printf("unable to get weather for %s: %s\n", location, err)
 			continue
@@ -647,7 +597,7 @@ func sendMorningMsg(
 	}
 
 	for _, stock := range morningMsgFuncArgs.Stocks {
-		stockPrice, err := getStockPrice(stock, state.GetStockAPIKey())
+		stockPrice, err := getStockPrice(stock, s.Config.StockAPIKey)
 		if err != nil {
 			log.Printf("unable to get weather for %s: %s\n", stock, err)
 			continue
@@ -663,16 +613,14 @@ func sendMorningMsg(
 	}
 
 	// reset the thread every morning
-	state.ResetOpenAIThread(channelID, client)
+	s.State.ResetOpenAIThread(channelID, s.AIClient)
 
 	getAndSendResponseWithoutTools(
 		ctx,
-		dg,
 		channelID,
 		messageReq,
 		MORNING_MESSAGE_INSTRUCTIONS,
-		client,
-		state,
+		s,
 	)
 }
 

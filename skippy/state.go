@@ -15,9 +15,7 @@ type State struct {
 	threadMap        map[string]*ChatThread
 	userPresenceMap  map[string]UserPresence
 	componentHandler *components.ComponentHandler
-	assistantID      string
 	mu               sync.RWMutex
-	discordToken     string
 	stockApiKey      string
 	weatherApiKey    string
 	// TODO
@@ -39,21 +37,10 @@ type ChatThread struct {
 	// reponses []string
 }
 
-func NewState(
-	assistantID string,
-	discordToken string,
-	stockApiKey string,
-	weatherApiKey string,
-	componentClient components.ComponentClient,
-) *State {
+func NewState() *State {
 	return &State{
-		threadMap:        make(map[string]*ChatThread),
-		userPresenceMap:  make(map[string]UserPresence),
-		componentHandler: components.NewComponentHandler(componentClient),
-		assistantID:      assistantID,
-		discordToken:     discordToken,
-		stockApiKey:      stockApiKey,
-		weatherApiKey:    weatherApiKey,
+		threadMap:       make(map[string]*ChatThread),
+		userPresenceMap: make(map[string]UserPresence),
 	}
 }
 
@@ -199,6 +186,7 @@ func (s *State) GetAlwaysRespond(threadID string) bool {
 	return thread.alwaysRespond
 }
 
+// TODO: move to config
 func (s *State) SetAwaitsResponse(threadID string, awaitsResponse bool, client *openai.Client) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -223,18 +211,6 @@ func (s *State) GetComponentHandler() *components.ComponentHandler {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.componentHandler
-}
-
-func (s *State) GetDiscordToken() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.discordToken
-}
-
-func (s *State) GetAssistantID() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.assistantID
 }
 
 func (s *State) GetStockAPIKey() string {

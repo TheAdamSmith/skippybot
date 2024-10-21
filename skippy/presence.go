@@ -12,35 +12,26 @@ import (
 )
 
 func onPresenceUpdateDebounce(
-	dg DiscordSession,
 	p *discordgo.PresenceUpdate,
-	s *State,
-	db Database,
 	debouncer *Debouncer,
-	config *Config,
+	s *Skippy,
 ) {
 	debouncer.Debounce(p.User.ID, func() {
-		onPresenceUpdate(dg, p, s, db, config)
+		onPresenceUpdate(p, s)
 	})
 }
 
-func onPresenceUpdate(
-	dg DiscordSession,
-	p *discordgo.PresenceUpdate,
-	s *State,
-	db Database,
-	config *Config,
-) {
-	if _, exists := config.UserConfigMap[p.User.ID]; !exists {
+func onPresenceUpdate(p *discordgo.PresenceUpdate, s *Skippy) {
+	if _, exists := s.Config.UserConfigMap[p.User.ID]; !exists {
 		return
 	}
 
 	game, isPlayingGame := getCurrentGame(p)
 	isPlayingGame = isPlayingGame && game != ""
 
-	userPresence, exists := s.GetPresence(p.User.ID)
+	userPresence, exists := s.State.GetPresence(p.User.ID)
 
-	member, err := dg.GetState().Member(p.GuildID, p.User.ID)
+	member, err := s.DiscordSession.GetState().Member(p.GuildID, p.User.ID)
 	if err != nil {
 		log.Println("Could not get user: ", err)
 		return
@@ -52,12 +43,12 @@ func onPresenceUpdate(
 
 	if startedPlaying {
 		log.Printf("User %s started playing %s\n", member.User.Username, game)
-		s.UpdatePresence(p.User.ID, WithStatus(p.Status), WithIsPlayingGame(isPlayingGame), WithGame(game), WithTimeStarted(time.Now()))
+		s.State.UpdatePresence(p.User.ID, WithStatus(p.Status), WithIsPlayingGame(isPlayingGame), WithGame(game), WithTimeStarted(time.Now()))
 	}
 
 	if stoppedPlaying {
 		duration := time.Since(userPresence.TimeStarted)
-		if duration < config.MinGameSessionDuration {
+		if duration < s.Config.MinGameSessionDuration {
 			return
 		}
 
@@ -75,27 +66,20 @@ func onPresenceUpdate(
 			Duration:  duration,
 		}
 
-		err = db.CreateGameSession(userSession)
+		err = s.DB.CreateGameSession(userSession)
 		if err != nil {
 			log.Println("Unable to create game session: ", err)
 		}
 
-		s.UpdatePresence(p.User.ID, WithStatus(p.Status), WithIsPlayingGame(isPlayingGame), WithGame(""), WithTimeStarted(time.Time{}))
+		s.State.UpdatePresence(p.User.ID, WithStatus(p.Status), WithIsPlayingGame(isPlayingGame), WithGame(""), WithTimeStarted(time.Time{}))
 	}
 }
 
-func pollPresenceStatus(
-	ctx context.Context,
-	dg DiscordSession,
-	client *openai.Client,
-	state *State,
-	db Database,
-	config *Config,
-) {
+func pollPresenceStatus(ctx context.Context, s *Skippy) {
 	now := time.Now()
-	for userID, userConfig := range config.UserConfigMap {
+	for userID, userConfig := range s.Config.UserConfigMap {
 		totTime := time.Duration(0)
-		presence, exists := state.GetPresence(userID)
+		presence, exists := s.State.GetPresence(userID)
 		if exists && now.Sub(presence.LastLimitReminder) < 24*time.Hour || !userConfig.Remind {
 			continue
 		}
@@ -104,16 +88,16 @@ func pollPresenceStatus(
 			totTime = totTime + now.Sub(presence.TimeStarted)
 		}
 
-		storedDuration, err := db.GetGameSessionSum(userID, 0)
+		storedDuration, err := s.DB.GetGameSessionSum(userID, 0)
 		if err != nil {
 			log.Println("could not get sum from database", err)
 		}
 
 		totTime = totTime + storedDuration
 		if totTime > userConfig.DailyLimit {
-			channelID := config.UserConfigMap[userID].LimitReminderChannelID
+			channelID := s.Config.UserConfigMap[userID].LimitReminderChannelID
 			if channelID == "" {
-				channel, err := dg.UserChannelCreate(userID)
+				channel, err := s.DiscordSession.UserChannelCreate(userID)
 				if err != nil {
 					log.Println("could not create user channel", err)
 					continue
@@ -123,7 +107,7 @@ func pollPresenceStatus(
 
 			log.Printf("User (%s) hit limit. Attempting to send reminder on %s.\n", userID, channelID)
 
-			sessions, err := db.GetGameSessionsByUserAndDays(userID, 0)
+			sessions, err := s.DB.GetGameSessionsByUserAndDays(userID, 0)
 			if err != nil {
 				log.Println("Unable to get game sessions: ", err)
 				continue
@@ -158,18 +142,16 @@ func pollPresenceStatus(
 
 			err = getAndSendResponseWithoutTools(
 				ctx,
-				dg,
 				channelID,
 				messageReq,
 				fmt.Sprintf(GAME_LIMIT_REMINDER_INSTRUCTIONS_FORMAT, UserMention(userID)),
-				client,
-				state,
+				s,
 			)
 			if err != nil {
 				log.Println("could not send response", err)
 				continue
 			}
-			state.UpdatePresence(userID, WithLastLimitReminder(now))
+			s.State.UpdatePresence(userID, WithLastLimitReminder(now))
 		}
 	}
 }

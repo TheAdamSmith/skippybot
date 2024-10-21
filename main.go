@@ -4,18 +4,11 @@ import (
 	"io"
 	"log"
 	"os"
-	"time"
+	"os/signal"
+	"skippybot/skippy"
+	"syscall"
 
 	"github.com/joho/godotenv"
-
-	skippy "skippybot/skippy"
-
-	openai "github.com/sashabaranov/go-openai"
-)
-
-const (
-	DEBOUNCE_DELAY            = 100 * time.Millisecond
-	MIN_GAME_SESSION_DURATION = 10 * time.Minute
 )
 
 func main() {
@@ -52,37 +45,19 @@ func main() {
 		log.Fatalln("could not read Assistant ID")
 	}
 
-	stockPriceAPIKey := os.Getenv("ALPHA_VANTAGE_API_KEY")
-	weatherAPIKey := os.Getenv("WEATHER_API_KEY")
-	clientConfig := openai.DefaultConfig(openAIKey)
-	clientConfig.AssistantVersion = "v2"
-	client := openai.NewClientWithConfig(clientConfig)
+	Skippy := skippy.NewSkippy(openAIKey, token, assistantID)
 
-	log.Println("Connecting to db")
-	db, err := skippy.NewDB("sqlite", "skippy.db")
-	if err != nil {
-		log.Fatalln("Unable to get database connection", err)
+	if err = Skippy.Run(); err != nil {
+		log.Fatalf("unable to start skippy %s", err)
 	}
 
-	config := &skippy.Config{
-		PresenceUpdateDebouncDelay: DEBOUNCE_DELAY,
-		MinGameSessionDuration:     MIN_GAME_SESSION_DURATION,
-		ReminderDurations: []time.Duration{
-			time.Minute * 10,
-			time.Minute * 30,
-			time.Minute * 90,
-			time.Hour * 3,
-		},
-		OpenAIModel:   openai.GPT4o,
-		UserConfigMap: make(map[string]skippy.UserConfig),
-	}
-
-	skippy.RunDiscord(
-		token,
-		assistantID,
-		stockPriceAPIKey,
-		weatherAPIKey,
-		client,
-		config,
-		db)
+	sc := make(chan os.Signal, 1)
+	signal.Notify(
+		sc,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+	<-sc
 }

@@ -11,10 +11,13 @@ type Config struct {
 	PresenceUpdateDebouncDelay time.Duration
 	// The schedule set for WaitForReminderResponse
 	ReminderDurations []time.Duration
-	OpenAIModel       string
+	DefaultModel      string
 	DailyGameLimit    time.Duration
 	// discordgo.User.ID -> UserPresenceConfig
 	UserConfigMap map[string]UserConfig
+	WeatherAPIKey string
+	StockAPIKey   string
+	AssistantID   string // TODO: remove
 }
 
 type UserConfig struct {
