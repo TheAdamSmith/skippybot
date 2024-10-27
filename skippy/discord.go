@@ -3,7 +3,6 @@ package skippy
 import (
 	"context"
 	"log"
-	"time"
 
 	openai "github.com/sashabaranov/go-openai"
 
@@ -83,27 +82,33 @@ func messageCreate(m *discordgo.MessageCreate, s *Skippy) {
 	message = removeRoleMention(message, role)
 	// TODO: remove add to system message
 	message = replaceChannelIDs(message, m.MentionChannels)
-	message += "\n current time: "
+	// message += "\n current time: "
 
-	// TODO: put in instructions
-	format := "Monday, Jan 02 at 03:04 PM"
-	message += time.Now().Format(format)
-	message += "\n User ID: " + m.Author.Mention()
+	// // TODO: put in instructions
+	// format := "Monday, Jan 02 at 03:04 PM"
+	// message += time.Now().Format(format)
+	// message += "\n User ID: " + m.Author.Mention()
 
 	log.Println("using message: ", message)
 
 	log.Println("CHANELLID: ", m.ChannelID)
-	messageReq := openai.MessageRequest{
-		Role:    openai.ChatMessageRoleUser,
-		Content: message,
+	response, err := GetResponseV2(context.Background(), m.ChannelID, m.Author.ID, message, s)
+	if err != nil {
+		log.Println(err)
+		return
 	}
-	getAndSendResponse(
-		context.Background(),
-		m.ChannelID,
-		messageReq,
-		DEFAULT_INSTRUCTIONS,
-		s,
-	)
+	s.DiscordSession.ChannelMessageSend(m.ChannelID, response)
+	// messageReq := openai.MessageRequest{
+	// 	Role:    openai.ChatMessageRoleUser,
+	// 	Content: message,
+	// }
+	// getAndSendResponse(
+	// 	context.Background(),
+	// 	m.ChannelID,
+	// 	messageReq,
+	// 	DEFAULT_INSTRUCTIONS,
+	// 	s,
+	// )
 }
 
 // Gets response from ai disables functions calls.

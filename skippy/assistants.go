@@ -317,7 +317,7 @@ outerloop:
 
 			output, err := handleGetWeather(funcArg, s)
 			if err != nil {
-				log.Println("error handling get_stock_price: ", err)
+				log.Println("error handling get_weather: ", err)
 			}
 
 			toolOutputs = append(

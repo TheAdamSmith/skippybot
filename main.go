@@ -30,7 +30,7 @@ func main() {
 		log.Fatalln("Unable to load env variables")
 	}
 
-	openAIKey := os.Getenv("OPEN_AI_KEY")
+	openAIKey := os.Getenv("GROQ_API_KEY")
 	if openAIKey == "" {
 		log.Fatalln("Unable to get Open AI API Key")
 	}

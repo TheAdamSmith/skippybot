@@ -33,7 +33,7 @@ type ChatThread struct {
 	// should update this to use separate params
 	cancelFunc context.CancelFunc
 	mu         sync.Mutex
-	// messages []string
+	messages   []openai.ChatCompletionMessage
 	// reponses []string
 }
 
@@ -44,6 +44,7 @@ func NewState() *State {
 	}
 }
 
+// TODO: make sure this is called
 func (s *State) Close() {
 	s.componentHandler.Close()
 }
@@ -55,6 +56,19 @@ func (s *State) GetThread(threadID string) (*ChatThread, bool) {
 	return thread, exists
 }
 
+func (s *State) NewThread(threadID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.threadMap[threadID] = &ChatThread{}
+}
+
+func (s *State) SetThreadMessages(threadID string, messages []openai.ChatCompletionMessage) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.threadMap[threadID].messages = messages
+}
+
+// TODO: update this for new logic
 func (s *State) GetOrCreateThread(threadID string, client *openai.Client) (*ChatThread, error) {
 	s.mu.RLock()
 	thread, exists := s.threadMap[threadID]

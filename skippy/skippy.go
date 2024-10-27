@@ -45,6 +45,7 @@ func NewSkippy(aiClientKey string, discordToken string, assistantID string) *Ski
 
 	clientConfig := openai.DefaultConfig(aiClientKey)
 	clientConfig.AssistantVersion = "v2"
+	clientConfig.BaseURL = "https://api.groq.com/openai/v1/"
 	aiClient := openai.NewClientWithConfig(clientConfig)
 
 	// TODO: should read this from the db first
@@ -57,7 +58,7 @@ func NewSkippy(aiClientKey string, discordToken string, assistantID string) *Ski
 			time.Minute * 90,
 			time.Hour * 3,
 		},
-		DefaultModel:  openai.GPT4o,
+		DefaultModel:  "llama3-groq-70b-8192-tool-use-preview",
 		UserConfigMap: make(map[string]UserConfig),
 		StockAPIKey:   os.Getenv("ALPHA_VANTAGE_API_KEY"),
 		WeatherAPIKey: os.Getenv("WEATHER_API_KEY"),
