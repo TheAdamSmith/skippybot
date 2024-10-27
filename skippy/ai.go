@@ -57,7 +57,7 @@ func GetResponseV2(ctx context.Context, dgChannID string, userID string, message
 
 	if choice.FinishReason == openai.FinishReasonToolCalls {
 		log.Println("Recieved tool call")
-		toolOutputs := getToolOutputs(ctx, choice.Message.ToolCalls, dgChannID, s)
+		toolOutputs := GetToolOutputs(ctx, choice.Message.ToolCalls, dgChannID, s)
 		messages = append(messages, toolOutputs...)
 
 		req.Messages = addTimeAndUserID(messages, userID)
@@ -79,105 +79,6 @@ func GetResponseV2(ctx context.Context, dgChannID string, userID string, message
 	return choice.Message.Content, nil
 }
 
-// TODO: get his working
-func getToolOutputs(
-	ctx context.Context,
-	toolCalls []openai.ToolCall,
-	dgChannID string,
-	s *Skippy,
-) []openai.ChatCompletionMessage {
-	var toolOutputs []openai.ChatCompletionMessage
-outerloop:
-	for _, toolCall := range toolCalls {
-		funcArg := FuncArgs{
-			ToolID:    toolCall.ID,
-			FuncName:  toolCall.Function.Name,
-			JsonValue: toolCall.Function.Arguments,
-		}
-
-		log.Printf("recieved function request:%+v", funcArg)
-		switch funcName := funcArg.FuncName; funcName {
-		case ToggleMorningMessage:
-			log.Println("toggle_morning_message()")
-			output, err := handleMorningMessage(
-				ctx,
-				funcArg,
-				dgChannID,
-				s,
-			)
-			if err != nil {
-				log.Println("error handling morning message: ", err)
-			}
-			// the bot will confuse multiple functions calls with this one so
-			// we only want to set the morning message if it is called
-			toolOutputs = makeNoOpToolMessage(toolCalls, funcArg.ToolID, output)
-			break outerloop
-		case GetStockPriceKey:
-			log.Println("get_stock_price()")
-
-			output, err := handleGetStockPrice(funcArg, s.Config.StockAPIKey)
-			if err != nil {
-				log.Println("error handling get_stock_price: ", err)
-			}
-
-			toolOutputs = append(
-				toolOutputs,
-				openai.ChatCompletionMessage{ToolCallID: funcArg.ToolID, Content: output, Role: openai.ChatMessageRoleTool},
-			)
-
-		case GetWeatherKey:
-			log.Println(GetWeatherKey)
-
-			output, err := handleGetWeather(funcArg, s)
-			if err != nil {
-				log.Println("error handling get_weather: ", err)
-			}
-
-			toolOutputs = append(
-				toolOutputs,
-				openai.ChatCompletionMessage{ToolCallID: funcArg.ToolID, Content: output, Role: openai.ChatMessageRoleTool},
-			)
-		case GenerateImage:
-			log.Println(GenerateImage)
-			output, err := getAndSendImage(
-				context.Background(),
-				funcArg,
-				dgChannID,
-				s,
-			)
-			if err != nil {
-				log.Println("unable to get image: ", err)
-			}
-			toolOutputs = append(
-				toolOutputs,
-				openai.ChatCompletionMessage{ToolCallID: funcArg.ToolID, Content: output, Role: openai.ChatMessageRoleTool},
-			)
-		case SetReminder:
-			log.Println("set_reminder()")
-			output, err := setReminder(
-				context.Background(),
-				funcArg,
-				dgChannID,
-				s,
-			)
-			if err != nil {
-				log.Println("error sending channel message: ", err)
-			}
-			toolOutputs = append(
-				toolOutputs,
-				openai.ChatCompletionMessage{ToolCallID: funcArg.ToolID, Content: output, Role: openai.ChatMessageRoleTool},
-			)
-		default:
-			toolOutputs = append(
-				toolOutputs,
-				openai.ChatCompletionMessage{ToolCallID: funcArg.ToolID, Content: "unkown tool used", Role: openai.ChatMessageRoleTool},
-			)
-		}
-	}
-
-	return toolOutputs
-}
-
 // adds the current user id and the timetamp to the message list
 func addTimeAndUserID(messages []openai.ChatCompletionMessage, userID string) []openai.ChatCompletionMessage {
 	format := "Monday, Jan 02 at 03:04 PM"
@@ -187,23 +88,4 @@ func addTimeAndUserID(messages []openai.ChatCompletionMessage, userID string) []
 		Role:    openai.ChatMessageRoleSystem,
 		Content: fmt.Sprintf("Current User: %s, Current time: %s", UserMention(userID), currTime),
 	})
-}
-
-// Creates a list of no-op tool outputs except for the provided toolID and output
-func makeNoOpToolMessage(tools []openai.ToolCall, toolID string, output string) []openai.ChatCompletionMessage {
-	var toolOutputs []openai.ChatCompletionMessage
-	for _, tool := range tools {
-		if tool.ID == toolID {
-			toolOutputs = append(
-				toolOutputs,
-				openai.ChatCompletionMessage{ToolCallID: toolID, Content: output, Role: openai.ChatMessageRoleTool},
-			)
-		} else {
-			toolOutputs = append(
-				toolOutputs,
-				openai.ChatCompletionMessage{ToolCallID: tool.ID, Content: "no-op", Role: openai.ChatMessageRoleTool},
-			)
-		}
-	}
-	return toolOutputs
 }
