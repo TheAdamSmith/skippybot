@@ -7,8 +7,6 @@ import (
 	"log"
 	"time"
 
-	openai "github.com/sashabaranov/go-openai"
-
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -228,18 +226,18 @@ func generateGameStats(i *discordgo.InteractionCreate, s *Skippy) error {
 		return err
 	}
 
-	messageReq := openai.MessageRequest{
-		Role:    openai.ChatMessageRoleUser,
-		Content: content,
-	}
-	ctx := context.WithValue(context.Background(), DisableFunctions, true)
-	go getAndSendResponseWithoutTools(
-		ctx,
-		i.ChannelID,
-		messageReq,
-		fmt.Sprintf(GENERATE_GAME_STAT_INSTRUCTIONS, i.Member.Mention()),
+	go getAndSendResponse(
+		context.Background(),
 		s,
+		ResponseReq{
+			ChannelID:              i.ChannelID,
+			UserID:                 i.User.ID,
+			Message:                content,
+			AdditionalInstructions: fmt.Sprintf(GENERATE_GAME_STAT_INSTRUCTIONS, i.Member.Mention()),
+			DisableTools:           true,
+		},
 	)
+
 	return nil
 }
 
@@ -362,10 +360,6 @@ func sendChannelMessage(i *discordgo.InteractionCreate, s *Skippy) error {
 
 	message := "prompt: " + prompt + "\n"
 	log.Println("message", message)
-	messageReq := openai.MessageRequest{
-		Role:    openai.ChatMessageRoleUser,
-		Content: message,
-	}
 
 	instructions := SEND_CHANNEL_MSG_INSTRUCTIONS
 	if mentionString != "" {
@@ -377,13 +371,16 @@ func sendChannelMessage(i *discordgo.InteractionCreate, s *Skippy) error {
 		)
 	}
 
-	ctx := context.WithValue(context.Background(), DisableFunctions, true)
-	go getAndSendResponseWithoutTools(
-		ctx,
-		channelID,
-		messageReq,
-		instructions,
+	go getAndSendResponse(
+		context.Background(),
 		s,
+		ResponseReq{
+			ChannelID:              channelID,
+			UserID:                 i.Member.User.ID,
+			Message:                message,
+			AdditionalInstructions: instructions,
+			DisableTools:           true,
+		},
 	)
 
 	err := s.DiscordSession.InteractionRespond(i.Interaction,

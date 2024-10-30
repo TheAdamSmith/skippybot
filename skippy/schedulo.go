@@ -229,18 +229,14 @@ func getUserAvailability(initialInteraction *discordgo.InteractionCreate, formDa
 }
 
 func getUserAvailabilityContent(initialInteraction *discordgo.InteractionCreate, formData *WhensGoodForm, s *Skippy) (string, error) {
-	messageReq := openai.MessageRequest{
-		Role:    openai.ChatMessageRoleUser,
-		Content: makeTimeSelectInstructions(formData, initialInteraction),
-	}
-
-	response, err := GetResponse(
+	response, err := GetResponseV2(
 		context.Background(),
-		initialInteraction.ChannelID,
-		messageReq,
-		"",
-		true,
 		s,
+		ResponseReq{
+			ChannelID:    initialInteraction.ID,
+			Message:      makeTimeSelectInstructions(formData, initialInteraction),
+			DisableTools: true,
+		},
 	)
 	if err != nil {
 		return "", err
@@ -315,12 +311,14 @@ func generateAndScheduleEvent(i *discordgo.InteractionCreate, activityName strin
 	for _, userID := range availableUserIDs {
 		content += UserMention(userID)
 	}
-	messageReq := openai.MessageRequest{
-		Role:    openai.ChatMessageRoleUser,
-		Content: content,
-	}
 
-	funcArgs, err := GetToolResponse(context.Background(), i.ChannelID, messageReq, "", GenerateEventTool, s)
+	funcArgs, err := GetResponseV2(context.Background(), s, ResponseReq{
+		ChannelID:        i.ChannelID,
+		Message:          content,
+		Tools:            []openai.Tool{GenerateEventTool},
+		RequireTools:     true,
+		ReturnToolOutput: true,
+	})
 	if err != nil {
 		log.Println("could not generate event data", err)
 		s.DiscordSession.ChannelMessageSend(i.ChannelID, ERROR_RESPONSE)
@@ -328,7 +326,7 @@ func generateAndScheduleEvent(i *discordgo.InteractionCreate, activityName strin
 	}
 
 	var eventFuncArgs EventFuncArgs
-	if err := json.Unmarshal([]byte(funcArgs[0].JsonValue), &eventFuncArgs); err != nil {
+	if err := json.Unmarshal([]byte(funcArgs), &eventFuncArgs); err != nil {
 		log.Println("could not read eventFuncArgs", err)
 		s.DiscordSession.ChannelMessageSend(i.ChannelID, ERROR_RESPONSE)
 		return

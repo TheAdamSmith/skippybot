@@ -16,36 +16,83 @@ Ignore the timestamp at the end of the message unless needed for funtions
 ignore the user id at the end of the message unless needed for funtions
 	`
 
-// TODO: add tools and additional system messages
-// TODO: user id
-func GetResponseV2(ctx context.Context, dgChannID string, userID string, message string, s *Skippy) (string, error) {
+const (
+	TOOL_CHOICE_AUTO     = "auto"
+	TOOL_CHOICE_NONE     = "none"
+	TOOL_CHOICE_REQUIRED = "required"
+)
+
+type ResponseReq struct {
+	ChannelID              string
+	UserID                 string
+	Message                string
+	Tools                  []openai.Tool
+	AdditionalInstructions string
+	DisableTools           bool
+	RequireTools           bool
+	// TODO: this behavior seems like it could cause issues. either refactor to use a specicific method or test thoroughly
+	ReturnToolOutput bool
+}
+
+type ToolChoice interface {
+	string | openai.ToolChoice
+}
+
+func GetResponseV2(ctx context.Context, s *Skippy, req ResponseReq) (string, error) {
 	var messages []openai.ChatCompletionMessage
 
-	thread, ok := s.State.GetThread(dgChannID)
+	thread, ok := s.State.GetThread(req.ChannelID)
 	if ok {
 		messages = thread.messages
 	} else {
-		s.State.NewThread(dgChannID)
+		s.State.NewThread(req.ChannelID)
 		messages = append(messages, openai.ChatCompletionMessage{
 			Role:    openai.ChatMessageRoleSystem,
 			Content: baseInstructions,
 		})
 	}
 
+	if req.AdditionalInstructions != "" {
+		messages = append(messages, openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleSystem,
+			Content: req.AdditionalInstructions,
+		})
+	}
+
+	if req.Tools == nil {
+		req.Tools = ALL_TOOLS
+	}
+
+	var toolChoice any = TOOL_CHOICE_AUTO
+	if req.DisableTools {
+		toolChoice = TOOL_CHOICE_NONE
+	} else if req.RequireTools {
+		if len(req.Tools) == 1 {
+			toolChoice = openai.ToolChoice{
+				Type: openai.ToolTypeFunction,
+				Function: openai.ToolFunction{
+					Name: req.Tools[0].Function.Name,
+				},
+			}
+		} else {
+			toolChoice = TOOL_CHOICE_REQUIRED
+		}
+	}
+
 	messages = append(messages, openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleUser,
-		Content: message,
+		Content: req.Message,
 	})
 
-	req := openai.ChatCompletionRequest{
-		ToolChoice: "auto",
+	completionReq := openai.ChatCompletionRequest{
+		ToolChoice: toolChoice,
 		Model:      s.Config.DefaultModel,
-		Messages:   addTimeAndUserID(messages, userID),
-		Tools:      ALL_TOOLS,
+		Messages:   addTimeAndUserID(messages, req.UserID),
+		Tools:      req.Tools,
 	}
 
 	startTime := time.Now()
-	resp, err := s.AIClient.CreateChatCompletion(ctx, req)
+	resp, err := s.AIClient.CreateChatCompletion(ctx, completionReq)
 	if err != nil {
 		log.Println("error getting response from ai", err)
 		return "", err
@@ -57,13 +104,17 @@ func GetResponseV2(ctx context.Context, dgChannID string, userID string, message
 
 	if choice.FinishReason == openai.FinishReasonToolCalls {
 		log.Println("Recieved tool call")
-		toolOutputs := GetToolOutputs(ctx, choice.Message.ToolCalls, dgChannID, s)
+		if req.ReturnToolOutput {
+			return choice.Message.ToolCalls[0].Function.Arguments, nil
+		}
+
+		toolOutputs := GetToolOutputs(ctx, choice.Message.ToolCalls, req.ChannelID, s)
 		messages = append(messages, toolOutputs...)
 
-		req.Messages = addTimeAndUserID(messages, userID)
+		completionReq.Messages = addTimeAndUserID(messages, req.ChannelID)
 
 		startTime := time.Now()
-		resp, err := s.AIClient.CreateChatCompletion(ctx, req)
+		resp, err := s.AIClient.CreateChatCompletion(ctx, completionReq)
 		if err != nil {
 			log.Println("error getting response from ai", err)
 			return "", err
@@ -74,7 +125,7 @@ func GetResponseV2(ctx context.Context, dgChannID string, userID string, message
 		messages = append(messages, choice.Message)
 	}
 
-	s.State.SetThreadMessages(dgChannID, messages)
+	s.State.SetThreadMessages(req.ChannelID, messages)
 
 	return choice.Message.Content, nil
 }
@@ -83,9 +134,12 @@ func GetResponseV2(ctx context.Context, dgChannID string, userID string, message
 func addTimeAndUserID(messages []openai.ChatCompletionMessage, userID string) []openai.ChatCompletionMessage {
 	format := "Monday, Jan 02 at 03:04 PM"
 	currTime := time.Now().Format(format)
-
+	content := fmt.Sprintf("Current time: %s", currTime)
+	if userID != "" {
+		content += fmt.Sprintf(", Current User: ", UserMention(userID))
+	}
 	return append(messages, openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleSystem,
-		Content: fmt.Sprintf("Current User: %s, Current time: %s", UserMention(userID), currTime),
+		Content: content,
 	})
 }

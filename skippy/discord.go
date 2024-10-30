@@ -4,8 +4,6 @@ import (
 	"context"
 	"log"
 
-	openai "github.com/sashabaranov/go-openai"
-
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -54,16 +52,14 @@ func messageCreate(m *discordgo.MessageCreate, s *Skippy) {
 	}
 
 	if threadExists && thread.awaitsResponse {
-		messageReq := openai.MessageRequest{
-			Role:    openai.ChatMessageRoleUser,
-			Content: m.Content,
-		}
 		getAndSendResponse(
 			context.Background(),
-			m.ChannelID,
-			messageReq,
-			DEFAULT_INSTRUCTIONS,
 			s,
+			ResponseReq{
+				ChannelID: m.ChannelID,
+				UserID:    m.Author.ID,
+				Message:   m.Content,
+			},
 		)
 		// value used by reminders to see if it needs to send another message to user
 		s.State.SetAwaitsResponse(m.ChannelID, false, s.AIClient)
@@ -80,91 +76,42 @@ func messageCreate(m *discordgo.MessageCreate, s *Skippy) {
 
 	message := removeBotMention(m.Content, s.DiscordSession.GetState().User.ID)
 	message = removeRoleMention(message, role)
-	// TODO: remove add to system message
+	// TODO: why did I have this here?
 	message = replaceChannelIDs(message, m.MentionChannels)
-	// message += "\n current time: "
-
-	// // TODO: put in instructions
-	// format := "Monday, Jan 02 at 03:04 PM"
-	// message += time.Now().Format(format)
-	// message += "\n User ID: " + m.Author.Mention()
 
 	log.Println("using message: ", message)
 
 	log.Println("CHANELLID: ", m.ChannelID)
-	response, err := GetResponseV2(context.Background(), m.ChannelID, m.Author.ID, message, s)
+	err := getAndSendResponse(context.Background(), s, ResponseReq{
+		ChannelID: m.ChannelID,
+		UserID:    m.Author.ID,
+		Message:   message,
+	})
 	if err != nil {
 		log.Println(err)
 		return
 	}
-	s.DiscordSession.ChannelMessageSend(m.ChannelID, response)
-	// messageReq := openai.MessageRequest{
-	// 	Role:    openai.ChatMessageRoleUser,
-	// 	Content: message,
-	// }
-	// getAndSendResponse(
-	// 	context.Background(),
-	// 	m.ChannelID,
-	// 	messageReq,
-	// 	DEFAULT_INSTRUCTIONS,
-	// 	s,
-	// )
 }
 
 // Gets response from ai disables functions calls.
 // Only capable of getting and sending a response
-func getAndSendResponseWithoutTools(
-	ctx context.Context,
-	dgChannID string,
-	messageReq openai.MessageRequest,
-	additionalInstructions string,
-	s *Skippy,
-) error {
-	log.Printf("Using message: %s\n", messageReq.Content)
-
-	log.Println("Attempting to get response...")
-
-	response, err := GetResponse(
-		ctx,
-		dgChannID,
-		messageReq,
-		additionalInstructions,
-		false,
-		s,
-	)
-	if err != nil {
-		log.Println("Unable to get response: ", err)
-		response = ERROR_RESPONSE
-	}
-
-	err = sendChunkedChannelMessage(s.DiscordSession, dgChannID, response)
-	return err
-}
-
 func getAndSendResponse(
 	ctx context.Context,
-	dgChannID string,
-	messageReq openai.MessageRequest,
-	additionalInstructions string,
 	s *Skippy,
+	req ResponseReq,
 ) error {
-	log.Printf("Using message: %s\n", messageReq.Content)
+	log.Printf("Using message: %s\n Attempting to get response...", req.Message)
 
-	log.Println("Attempting to get response...")
-
-	response, err := GetResponse(
+	response, err := GetResponseV2(
 		ctx,
-		dgChannID,
-		messageReq,
-		additionalInstructions,
-		false,
 		s,
+		req,
 	)
 	if err != nil {
 		log.Println("Unable to get response: ", err)
 		response = ERROR_RESPONSE
 	}
 
-	err = sendChunkedChannelMessage(s.DiscordSession, dgChannID, response)
+	err = sendChunkedChannelMessage(s.DiscordSession, req.ChannelID, response)
 	return err
 }

@@ -340,17 +340,15 @@ func sendAdditionalReminder(
 		UserMention(userID),
 	)
 
-	messageReq := openai.MessageRequest{
-		Role:    openai.ChatMessageRoleAssistant,
-		Content: message,
-	}
-
-	getAndSendResponseWithoutTools(
+	getAndSendResponse(
 		ctx,
-		channelID,
-		messageReq,
-		DEFAULT_INSTRUCTIONS,
 		s,
+		ResponseReq{
+			ChannelID:    channelID,
+			UserID:       userID,
+			Message:      message,
+			DisableTools: true,
+		},
 	)
 }
 
@@ -381,20 +379,18 @@ func sendMorningMsg(
 
 	log.Println("getting morning message with prompt: ", message)
 
-	messageReq := openai.MessageRequest{
-		Role:    openai.ChatMessageRoleAssistant,
-		Content: message,
-	}
-
+	// TODO: remove
 	// reset the thread every morning
 	s.State.ResetOpenAIThread(channelID, s.AIClient)
 
-	getAndSendResponseWithoutTools(
+	getAndSendResponse(
 		ctx,
-		channelID,
-		messageReq,
-		MORNING_MESSAGE_INSTRUCTIONS,
 		s,
+		ResponseReq{
+			ChannelID:              channelID,
+			Message:                message,
+			AdditionalInstructions: MORNING_MESSAGE_INSTRUCTIONS,
+		},
 	)
 }
 

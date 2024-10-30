@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	openai "github.com/sashabaranov/go-openai"
 )
 
 func onPresenceUpdateDebounce(
@@ -135,17 +134,16 @@ func pollPresenceStatus(ctx context.Context, s *Skippy) {
 				}
 				content = string(jsonData)
 			}
-			messageReq := openai.MessageRequest{
-				Role:    openai.ChatMessageRoleAssistant,
-				Content: content,
-			}
 
-			err = getAndSendResponseWithoutTools(
+			err = getAndSendResponse(
 				ctx,
-				channelID,
-				messageReq,
-				fmt.Sprintf(GAME_LIMIT_REMINDER_INSTRUCTIONS_FORMAT, UserMention(userID)),
 				s,
+				ResponseReq{
+					ChannelID:              channelID,
+					Message:                content,
+					AdditionalInstructions: fmt.Sprintf(GAME_LIMIT_REMINDER_INSTRUCTIONS_FORMAT, UserMention(userID)),
+					DisableTools:           true,
+				},
 			)
 			if err != nil {
 				log.Println("could not send response", err)

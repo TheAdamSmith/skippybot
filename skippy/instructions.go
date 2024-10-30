@@ -2,6 +2,7 @@ package skippy
 
 // The additional instructsions provided for each message type
 const (
+	// TODO: determine if this is needed
 	DEFAULT_INSTRUCTIONS = `Try to be as helpful as possible while keeping the iconic skippy saracasm in your response.
 	Use responses of varying lengths.
 	`
