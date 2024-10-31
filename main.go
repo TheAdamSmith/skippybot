@@ -51,6 +51,7 @@ func main() {
 	if err = Skippy.Run(); err != nil {
 		log.Fatalf("unable to start skippy %s", err)
 	}
+	defer Skippy.Close()
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(

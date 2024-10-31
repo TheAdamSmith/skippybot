@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/signal"
 	"skippybot/components"
-	"syscall"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -95,7 +93,6 @@ func (s *Skippy) Run() error {
 	if err != nil {
 		return fmt.Errorf("error unable to open discord session %w", err)
 	}
-	defer s.DiscordSession.Close()
 
 	s.DiscordSession.AddHandler(func(_ *discordgo.Session, m *discordgo.MessageCreate) {
 		messageCreate(m, s)
@@ -128,14 +125,17 @@ func (s *Skippy) Run() error {
 	// deleteSlashCommands(dg)
 
 	log.Println("Bot is now running. Press CTRL+C to exit.")
-	sc := make(chan os.Signal, 1)
-	signal.Notify(
-		sc,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		os.Interrupt,
-		syscall.SIGTERM,
-	)
-	<-sc
+
+	return nil
+}
+
+func (s *Skippy) Close() error {
+	s.ComponentHandler.Close()
+	if err := s.DiscordSession.Close(); err != nil {
+		return err
+	}
+	if err := s.DB.Close(); err != nil {
+		return err
+	}
 	return nil
 }

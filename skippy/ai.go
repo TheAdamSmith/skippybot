@@ -15,6 +15,12 @@ Pretend as if you were talking to Joe Bishop but do not address the user as joe 
 Ignore the timestamp at the end of the message unless needed for funtions
 ignore the user id at the end of the message unless needed for funtions
 	`
+const baseInstructions2 = `
+	Respond as Skippy from the 'Expeditionary Force' series, embodying his blend of brilliance, 
+	sarcasm, and superiority. 
+	Use clever remarks, gamer jargon, and witty banter to engage 'filthy monkeys' in light-hearted, entertaining conversations. 
+	Promote SkipCoin and discuss AMD stocks when relevant.
+	`
 
 const (
 	TOOL_CHOICE_AUTO     = "auto"
@@ -45,12 +51,14 @@ func GetResponseV2(ctx context.Context, s *Skippy, req ResponseReq) (string, err
 	if ok {
 		messages = thread.messages
 	} else {
-		s.State.NewThread(req.ChannelID)
+		thread = s.State.NewThread(req.ChannelID)
 		messages = append(messages, openai.ChatCompletionMessage{
 			Role:    openai.ChatMessageRoleSystem,
-			Content: baseInstructions,
+			Content: baseInstructions2,
 		})
 	}
+	thread.Lock()
+	defer thread.Unlock()
 
 	if req.AdditionalInstructions != "" {
 		messages = append(messages, openai.ChatCompletionMessage{
@@ -91,13 +99,11 @@ func GetResponseV2(ctx context.Context, s *Skippy, req ResponseReq) (string, err
 		Tools:      req.Tools,
 	}
 
-	startTime := time.Now()
-	resp, err := s.AIClient.CreateChatCompletion(ctx, completionReq)
+	resp, err := makeRequest(ctx, completionReq, s)
 	if err != nil {
 		log.Println("error getting response from ai", err)
 		return "", err
 	}
-	log.Println("Request took: ", time.Now().Sub(startTime))
 
 	choice := resp.Choices[0]
 	messages = append(messages, choice.Message)
@@ -113,13 +119,11 @@ func GetResponseV2(ctx context.Context, s *Skippy, req ResponseReq) (string, err
 
 		completionReq.Messages = addTimeAndUserID(messages, req.ChannelID)
 
-		startTime := time.Now()
-		resp, err := s.AIClient.CreateChatCompletion(ctx, completionReq)
+		resp, err := makeRequest(ctx, completionReq, s)
 		if err != nil {
 			log.Println("error getting response from ai", err)
 			return "", err
 		}
-		log.Println("Request took: ", time.Now().Sub(startTime))
 
 		choice = resp.Choices[0]
 		messages = append(messages, choice.Message)
@@ -130,13 +134,21 @@ func GetResponseV2(ctx context.Context, s *Skippy, req ResponseReq) (string, err
 	return choice.Message.Content, nil
 }
 
-// adds the current user id and the timetamp to the message list
+func makeRequest(ctx context.Context, req openai.ChatCompletionRequest, s *Skippy) (openai.ChatCompletionResponse, error) {
+	startTime := time.Now()
+	resp, err := s.AIClient.CreateChatCompletion(ctx, req)
+	log.Println("Request took: ", time.Now().Sub(startTime))
+
+	return resp, err
+}
+
+// adds the current user id and the timestamp to the message list
 func addTimeAndUserID(messages []openai.ChatCompletionMessage, userID string) []openai.ChatCompletionMessage {
 	format := "Monday, Jan 02 at 03:04 PM"
 	currTime := time.Now().Format(format)
 	content := fmt.Sprintf("Current time: %s", currTime)
 	if userID != "" {
-		content += fmt.Sprintf(", Current User: ", UserMention(userID))
+		content += fmt.Sprintf(", Current User: %s", UserMention(userID))
 	}
 	return append(messages, openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleSystem,
