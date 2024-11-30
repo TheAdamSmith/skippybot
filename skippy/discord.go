@@ -41,7 +41,7 @@ func sendChunkedChannelMessage(
 	return nil
 }
 
-func messageCreate(m *discordgo.MessageCreate, s *Skippy) {
+func OnMessageCreate(m *discordgo.MessageCreate, s *Skippy) {
 	log.Printf("Recieved Message: %s\n", m.Content)
 
 	thread, threadExists := s.State.GetThread(m.ChannelID)
@@ -101,6 +101,8 @@ func getAndSendResponse(
 	req ResponseReq,
 ) error {
 	log.Printf("Using message: %s\n Attempting to get response...", req.Message)
+
+	s.DiscordSession.ChannelTyping(req.ChannelID)
 
 	response, err := GetResponseV2(
 		ctx,

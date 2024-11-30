@@ -10,17 +10,17 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-func onPresenceUpdateDebounce(
+func OnPresenceUpdateDebounce(
 	p *discordgo.PresenceUpdate,
 	debouncer *Debouncer,
 	s *Skippy,
 ) {
 	debouncer.Debounce(p.User.ID, func() {
-		onPresenceUpdate(p, s)
+		OnPresenceUpdate(p, s)
 	})
 }
 
-func onPresenceUpdate(p *discordgo.PresenceUpdate, s *Skippy) {
+func OnPresenceUpdate(p *discordgo.PresenceUpdate, s *Skippy) {
 	if _, exists := s.Config.UserConfigMap[p.User.ID]; !exists {
 		return
 	}
@@ -74,7 +74,7 @@ func onPresenceUpdate(p *discordgo.PresenceUpdate, s *Skippy) {
 	}
 }
 
-func pollPresenceStatus(ctx context.Context, s *Skippy) {
+func PollPresenceStatus(ctx context.Context, s *Skippy) {
 	now := time.Now()
 	for userID, userConfig := range s.Config.UserConfigMap {
 		totTime := time.Duration(0)

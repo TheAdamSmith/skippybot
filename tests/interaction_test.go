@@ -14,18 +14,24 @@ import (
 func TestToggleAlwaysRespond(t *testing.T) {
 	t.Parallel()
 	channelID := GenerateRandomID(10)
+	userID := GenerateRandomID(10)
 
 	interaction := &discordgo.InteractionCreate{
 		Interaction: &discordgo.Interaction{
 			Type:      discordgo.InteractionApplicationCommand,
 			ChannelID: channelID,
+			Member: &discordgo.Member{
+				User: &discordgo.User{
+					ID: userID,
+				},
+			},
 			Data: discordgo.ApplicationCommandInteractionData{
 				Name: skippy.ALWAYS_RESPOND,
 			},
 		},
 	}
-	skippy.OnCommand(dg, interaction, client, state, db, config)
-
+	skippy.OnInteraction(interaction, s)
+	
 	if !state.GetAlwaysRespond(channelID) {
 		t.Error("Always respond should be true")
 	}
@@ -42,7 +48,7 @@ func TestToggleAlwaysRespond(t *testing.T) {
 		},
 	}
 
-	skippy.MessageCreate(dg, msg, client, state, scheduler, config)
+	skippy.OnMessageCreate(msg, s)
 
 	if len(dg.channelMessages[channelID]) != 1 {
 		t.Error("Expected ChannelMessageSend to be called")
@@ -55,12 +61,17 @@ func TestToggleAlwaysRespond(t *testing.T) {
 		Interaction: &discordgo.Interaction{
 			Type:      discordgo.InteractionApplicationCommand,
 			ChannelID: channelID,
+			Member: &discordgo.Member{
+				User: &discordgo.User{
+					ID: userID,
+				},
+			},
 			Data: discordgo.ApplicationCommandInteractionData{
 				Name: skippy.ALWAYS_RESPOND,
 			},
 		},
 	}
-	skippy.OnCommand(dg, interaction, client, state, db, config)
+	skippy.OnInteraction(interaction, s)
 
 	if state.GetAlwaysRespond(channelID) {
 		t.Error("Always respond should be false")
@@ -72,12 +83,18 @@ func TestSendChannelMessage(t *testing.T) {
 	channelID_1 := GenerateRandomID(10)
 	channelID_2 := GenerateRandomID(10)
 	mentionID := "00000001"
+	userID := GenerateRandomID(10)
 
 	interaction := &discordgo.InteractionCreate{
 		Interaction: &discordgo.Interaction{
 			GuildID:   GUILD_ID,
 			Type:      discordgo.InteractionApplicationCommand,
 			ChannelID: channelID_1,
+			Member: &discordgo.Member{
+				User: &discordgo.User{
+					ID: userID,
+				},
+			},
 			Data: discordgo.ApplicationCommandInteractionData{
 				Name: skippy.SEND_MESSAGE,
 				Options: []*discordgo.ApplicationCommandInteractionDataOption{
@@ -100,7 +117,7 @@ func TestSendChannelMessage(t *testing.T) {
 			},
 		},
 	}
-	skippy.OnCommand(dg, interaction, client, state, db, config)
+	skippy.OnInteraction(interaction, s)
 	// wait for message
 	timer := time.NewTimer(2 * time.Minute)
 loop:
@@ -136,7 +153,7 @@ func TestGenerateGameStats(t *testing.T) {
 	// these need to be capitalized and spaced out because bot will automatically do that
 	// needed for assertions below
 	games := []string{"Valorant", "Rocket League"}
-	generateTestData(db, userID, time.Hour, games)
+	generateTestData(s.DB, userID, time.Hour, games)
 
 	interaction := &discordgo.InteractionCreate{
 		Interaction: &discordgo.Interaction{
@@ -152,7 +169,7 @@ func TestGenerateGameStats(t *testing.T) {
 			},
 		},
 	}
-	skippy.OnCommand(dg, interaction, client, state, db, config)
+	skippy.OnInteraction(interaction, s)
 
 	// wait for message
 	timer := time.NewTimer(2 * time.Minute)
@@ -223,7 +240,7 @@ func TestTrackGameUsage(t *testing.T) {
 			},
 		},
 	}
-	skippy.OnCommand(dg, interaction, client, state, db, config)
+	skippy.OnInteraction(interaction, s)
 
 	userConfig, exists := config.UserConfigMap[userID]
 	if !exists {
@@ -261,7 +278,7 @@ func TestTrackGameUsage(t *testing.T) {
 			},
 		},
 	}
-	skippy.OnCommand(dg, interaction, client, state, db, config)
+	skippy.OnInteraction(interaction, s)
 
 	if _, exists = config.UserConfigMap[userID]; exists {
 		t.Error("Expected user config to not exist")

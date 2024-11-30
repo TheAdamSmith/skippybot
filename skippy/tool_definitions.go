@@ -6,12 +6,12 @@ import (
 )
 
 var ALL_TOOLS = []openai.Tool{
+	ToggleMorningMessageTool,
 	GetStockPricesTool,
 	GetWeatherTool,
 	GenerateEventTool,
 	SetReminderTool,
 	GenerateImageTool,
-	ToggleMorningMessageTool,
 }
 
 var NO_TOOLS = []openai.Tool{}
@@ -151,8 +151,8 @@ var ToggleMorningMessageTool = openai.Tool{
 }
 
 var ToggleMorningMessageFuncDef = openai.FunctionDefinition{
-	Name:        "toggle_morning_message",
-	Description: "Turn on the bot's morning message. If this function is called, get_weather and get_stock_price should not be called",
+	Name:        "set_morning_message",
+	Description: "Turn on/off the bot's morning message. Set this regardless of the requested time of day. Do not ask follow up questions. If this function is called, get_weather and get_stock_price should not be called",
 	Parameters: &jsonschema.Definition{
 		Type: jsonschema.Object,
 		Properties: map[string]jsonschema.Definition{
@@ -162,7 +162,7 @@ var ToggleMorningMessageFuncDef = openai.FunctionDefinition{
 			},
 			"time": {
 				Type:        jsonschema.String,
-				Description: "The time of day to send the morning message",
+				Description: "The time of day to send the morning message in 24HR format. Does not have to be in the morning",
 			},
 			"weather_locations": {
 				Type:        jsonschema.Array,

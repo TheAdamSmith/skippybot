@@ -123,7 +123,7 @@ func initSlashCommands(
 	return commands, nil
 }
 
-func onCommand(i *discordgo.InteractionCreate, s *Skippy) {
+func OnInteraction(i *discordgo.InteractionCreate, s *Skippy) {
 	log.Println(i.ApplicationCommandData().Name)
 	switch i.ApplicationCommandData().Name {
 	case ALWAYS_RESPOND:
@@ -231,7 +231,7 @@ func generateGameStats(i *discordgo.InteractionCreate, s *Skippy) error {
 		s,
 		ResponseReq{
 			ChannelID:              i.ChannelID,
-			UserID:                 i.User.ID,
+			UserID:                 i.Member.User.ID,
 			Message:                content,
 			AdditionalInstructions: fmt.Sprintf(GENERATE_GAME_STAT_INSTRUCTIONS, i.Member.Mention()),
 			DisableTools:           true,

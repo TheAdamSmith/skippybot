@@ -41,12 +41,7 @@ func main() {
 		log.Fatalln("could not read discord token")
 	}
 
-	assistantID := os.Getenv("ASSISTANT_ID")
-	if assistantID == "" {
-		log.Fatalln("could not read Assistant ID")
-	}
-
-	Skippy := skippy.NewSkippy(openAIKey, token, assistantID)
+	Skippy := skippy.NewSkippy(openAIKey, token)
 
 	if err = Skippy.Run(); err != nil {
 		log.Fatalf("unable to start skippy %s", err)

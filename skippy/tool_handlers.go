@@ -17,7 +17,7 @@ const (
 	SendChannelMessage   string = "send_channel_message"
 	SetReminder          string = "set_reminder"
 	GenerateImage        string = "generate_image"
-	ToggleMorningMessage string = "toggle_morning_message"
+	ToggleMorningMessage string = "set_morning_message"
 	GenerateEvent        string = "generate_event"
 )
 
@@ -381,7 +381,7 @@ func sendMorningMsg(
 
 	// TODO: remove
 	// reset the thread every morning
-	s.State.ResetOpenAIThread(channelID, s.AIClient)
+	s.State.NewThread(channelID)
 
 	getAndSendResponse(
 		ctx,
@@ -390,6 +390,7 @@ func sendMorningMsg(
 			ChannelID:              channelID,
 			Message:                message,
 			AdditionalInstructions: MORNING_MESSAGE_INSTRUCTIONS,
+			DisableTools: true,
 		},
 	)
 }

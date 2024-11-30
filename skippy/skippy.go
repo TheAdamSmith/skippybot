@@ -29,7 +29,7 @@ const (
 )
 
 // TODO: need to create option funcs to pass in here and read from env as default?
-func NewSkippy(aiClientKey string, discordToken string, assistantID string) *Skippy {
+func NewSkippy(aiClientKey string, discordToken string) *Skippy {
 	session, err := discordgo.New("Bot " + discordToken)
 	if err != nil {
 		log.Fatalln("Unable to get discord client")
@@ -62,7 +62,6 @@ func NewSkippy(aiClientKey string, discordToken string, assistantID string) *Ski
 		UserConfigMap: make(map[string]UserConfig),
 		StockAPIKey:   os.Getenv("ALPHA_VANTAGE_API_KEY"),
 		WeatherAPIKey: os.Getenv("WEATHER_API_KEY"),
-		AssistantID:   assistantID,
 	}
 
 	log.Println("Connecting to db")
@@ -95,14 +94,14 @@ func (s *Skippy) Run() error {
 	}
 
 	s.DiscordSession.AddHandler(func(_ *discordgo.Session, m *discordgo.MessageCreate) {
-		messageCreate(m, s)
+		OnMessageCreate(m, s)
 	})
 
 	s.DiscordSession.AddHandler(
 		func(_ *discordgo.Session, i *discordgo.InteractionCreate) {
 			switch i.Type {
 			case discordgo.InteractionApplicationCommand:
-				onCommand(i, s)
+				OnInteraction(i, s)
 			}
 		},
 	)
@@ -111,7 +110,7 @@ func (s *Skippy) Run() error {
 	// might be from multiple servers so debounce the calls
 	debouncer := NewDebouncer(s.Config.PresenceUpdateDebouncDelay)
 	s.DiscordSession.AddHandler(func(_ *discordgo.Session, p *discordgo.PresenceUpdate) {
-		onPresenceUpdateDebounce(p, debouncer, s)
+		OnPresenceUpdateDebounce(p, debouncer, s)
 	})
 
 	initSlashCommands(s.DiscordSession)
@@ -119,7 +118,7 @@ func (s *Skippy) Run() error {
 	s.Scheduler.Start()
 
 	s.Scheduler.AddDurationJob(POLL_INTERVAL, func() {
-		pollPresenceStatus(context.Background(), s)
+		PollPresenceStatus(context.Background(), s)
 	})
 
 	// deleteSlashCommands(dg)

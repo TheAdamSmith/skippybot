@@ -1,8 +1,6 @@
 package skippy
 
 import (
-	"context"
-	"log"
 	"sync"
 
 	openai "github.com/sashabaranov/go-openai"
@@ -84,31 +82,12 @@ func (s *State) GetPresence(userID string) (UserPresence, bool) {
 	return presence, true
 }
 
-func (s *State) ResetOpenAIThread(threadID string, client *openai.Client) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	log.Println("Resetting thread...")
-	thread, err := client.CreateThread(context.Background(), openai.ThreadRequest{})
-	if err != nil {
-		return err
-	}
-
-	_, exists := s.threadMap[threadID]
-	if !exists {
-		s.threadMap[threadID] = &ChatThread{}
-	}
-
-	s.threadMap[threadID].openAIThread = thread
-
-	return nil
-}
-
 func (s *State) ToggleAlwaysRespond(threadID string, client *openai.Client) bool {
 	s.mu.Lock()
 	_, threadExists := s.threadMap[threadID]
 	if !threadExists {
 		s.mu.Unlock()
-		s.ResetOpenAIThread(threadID, client)
+		s.NewThread(threadID)
 		s.mu.Lock()
 	}
 	updateVal := !s.threadMap[threadID].alwaysRespond
@@ -132,7 +111,7 @@ func (s *State) SetAwaitsResponse(threadID string, awaitsResponse bool, client *
 	defer s.mu.Unlock()
 	_, threadExists := s.threadMap[threadID]
 	if !threadExists {
-		s.ResetOpenAIThread(threadID, client)
+		s.NewThread(threadID)
 	}
 	s.threadMap[threadID].awaitsResponse = awaitsResponse
 }

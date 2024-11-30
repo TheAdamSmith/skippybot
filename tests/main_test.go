@@ -32,6 +32,7 @@ const (
 // these variables are shared between tests which is intentional
 // they simulate a live discord environment
 var (
+	s             *skippy.Skippy
 	client        *openai.Client
 	state         *skippy.State
 	dg            *MockDiscordSession
@@ -51,7 +52,7 @@ func TestMain(m *testing.M) {
 		log.SetOutput(io.Discard)
 	}
 	var err error
-	dg, client, state, db, scheduler, config, err = setup()
+	s, err = setup()
 	defer teardown()
 	if err != nil {
 		fmt.Println(err)
@@ -69,12 +70,7 @@ func GenerateRandomID(n int) string {
 }
 
 func setup() (
-	dg *MockDiscordSession,
-	client *openai.Client,
-	state *skippy.State,
-	db skippy.Database,
-	scheduler *skippy.Scheduler,
-	config *skippy.Config, err error,
+	s *skippy.Skippy, err error,
 ) {
 	dg = &MockDiscordSession{
 		channelMessages:     make(map[string][]string),
@@ -111,6 +107,7 @@ func setup() (
 	}
 
 	openAIKey := os.Getenv("OPEN_AI_KEY")
+	// openAIKey := os.Getenv("GROQ_API_KEY")
 	if openAIKey == "" {
 		err = fmt.Errorf("unable to get Open AI API Key")
 		return
@@ -123,16 +120,22 @@ func setup() (
 	}
 
 	clientConfig := openai.DefaultConfig(openAIKey)
-	clientConfig.AssistantVersion = "v2"
+	// clientConfig.BaseURL = "https://api.groq.com/openai/v1/"
 	client = openai.NewClientWithConfig(clientConfig)
-	state = skippy.NewState(assistantID, "", "", "")
+	state = skippy.NewState()
 
-	mrog, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	mrog, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	if err != nil {
+		log.Println(err)
 		return
 	}
 
-	mrog.AutoMigrate(&skippy.GameSession{})
+	err = mrog.AutoMigrate(&skippy.GameSession{})
+	if err != nil {
+		log.Println(err)
+		return
+
+	}
 	db = &skippy.DB{DB: mrog}
 
 	scheduler, err = skippy.NewScheduler()
@@ -156,10 +159,20 @@ func setup() (
 			time.Millisecond * 50,
 			time.Hour,
 		},
-		OpenAIModel:   openai.GPT3Dot5Turbo,
+		// DefaultModel:  "llama-3.1-70b-versatile",
+		DefaultModel:  openai.GPT4o,
 		UserConfigMap: userConfigMap,
+		StockAPIKey:   os.Getenv("ALPHA_VANTAGE_API_KEY"),
+		WeatherAPIKey: os.Getenv("WEATHER_API_KEY"),
 	}
-
+	s = &skippy.Skippy{
+		DiscordSession: dg,
+		AIClient:       client,
+		Config:         config,
+		State:          state,
+		DB:             db,
+		Scheduler:      scheduler,
+	}
 	return
 }
 
@@ -188,6 +201,7 @@ func generateTestData(
 			StartedAt: startTime,
 			Duration:  duration,
 		}
+		log.Println(session)
 		db.CreateGameSession(&session)
 	}
 }

@@ -17,7 +17,6 @@ type Config struct {
 	UserConfigMap map[string]UserConfig
 	WeatherAPIKey string
 	StockAPIKey   string
-	AssistantID   string // TODO: remove
 }
 
 type UserConfig struct {
