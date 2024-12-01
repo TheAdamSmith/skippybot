@@ -28,7 +28,7 @@ func TestOnPresenceUpdate(t *testing.T) {
 	}
 
 	skippy.OnPresenceUpdate(presenceUpdate, s)
-	userPresence, exists := state.GetPresence(USER_ID)
+	userPresence, exists := s.State.GetPresence(USER_ID)
 
 	if !exists {
 		t.Fatal("expected presence to exist")
@@ -48,7 +48,7 @@ func TestOnPresenceUpdate(t *testing.T) {
 		},
 	}
 	skippy.OnPresenceUpdate(presenceUpdate, s)
-	userPresence, exists = state.GetPresence(USER_ID)
+	userPresence, exists = s.State.GetPresence(USER_ID)
 
 	if !exists {
 		t.Fatal("expected presence to exist")
@@ -102,7 +102,7 @@ func TestOnPresenceUpdateDebounce(t *testing.T) {
 	}
 
 	time.Sleep(time.Millisecond * 100)
-	userPresence, exists := state.GetPresence(USER_ID)
+	userPresence, exists := s.State.GetPresence(USER_ID)
 	if !exists {
 		t.Fatal("expected presence to exist")
 	}
@@ -129,7 +129,7 @@ func TestOnPresenceUpdateDebounce(t *testing.T) {
 	}
 	time.Sleep(time.Millisecond * 100)
 
-	userPresence, exists = state.GetPresence(USER_ID)
+	userPresence, exists = s.State.GetPresence(USER_ID)
 	if !exists {
 		t.Fatal("expected presence to exist")
 	}
@@ -167,7 +167,7 @@ func TestPollPresence(t *testing.T) {
 		t.Fatal("expected message to be sent not be on user channel")
 	}
 
-	state.UpdatePresence(
+	s.State.UpdatePresence(
 		USER_ID,
 		skippy.WithGame("Rocket League"),
 		skippy.WithTimeStarted(time.Now().Add(-2*time.Hour)),
@@ -189,7 +189,7 @@ func TestPollPresence(t *testing.T) {
 	}
 
 	// reset the state so we can test db
-	state.UpdatePresence(
+	s.State.UpdatePresence(
 		USER_ID,
 		skippy.WithGame(""),
 		skippy.WithTimeStarted(time.Time{}),

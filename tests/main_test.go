@@ -33,12 +33,7 @@ const (
 // they simulate a live discord environment
 var (
 	s             *skippy.Skippy
-	client        *openai.Client
-	state         *skippy.State
 	dg            *MockDiscordSession
-	db            skippy.Database
-	scheduler     *skippy.Scheduler
-	config        *skippy.Config
 	enableLogging bool
 )
 
@@ -121,8 +116,8 @@ func setup() (
 
 	clientConfig := openai.DefaultConfig(openAIKey)
 	// clientConfig.BaseURL = "https://api.groq.com/openai/v1/"
-	client = openai.NewClientWithConfig(clientConfig)
-	state = skippy.NewState()
+	client := openai.NewClientWithConfig(clientConfig)
+	state := skippy.NewState()
 
 	mrog, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -136,9 +131,9 @@ func setup() (
 		return
 
 	}
-	db = &skippy.DB{DB: mrog}
+	db := &skippy.DB{DB: mrog}
 
-	scheduler, err = skippy.NewScheduler()
+	scheduler, err := skippy.NewScheduler()
 	if err != nil {
 		return
 	}
@@ -151,7 +146,7 @@ func setup() (
 		WeeklyLimit: 1 * time.Second,
 	}
 
-	config = &skippy.Config{
+	config := &skippy.Config{
 		MinGameSessionDuration:     time.Nanosecond * 1,
 		PresenceUpdateDebouncDelay: time.Millisecond * 100,
 		ReminderDurations: []time.Duration{
@@ -177,7 +172,7 @@ func setup() (
 }
 
 func teardown() {
-	err := db.Close()
+	err := s.DB.Close()
 	if err != nil {
 		fmt.Println("unable to close db connection: ", err)
 	}

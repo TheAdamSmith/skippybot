@@ -261,7 +261,7 @@ loop:
 		t.Error("Expected ChannelTyping to be called")
 	}
 
-	if !scheduler.HasMorningMsgJob(channelID) {
+	if !s.Scheduler.HasMorningMsgJob(channelID) {
 		t.Error("Expected job to be scheduled")
 	}
 
@@ -289,7 +289,7 @@ loop:
 		t.Error("Expected morning message to be canceled")
 	}
 
-	if scheduler.HasMorningMsgJob(channelID) {
+	if s.Scheduler.HasMorningMsgJob(channelID) {
 		t.Error("Expected job to be canceled")
 	}
 

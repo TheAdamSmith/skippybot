@@ -32,7 +32,7 @@ func TestToggleAlwaysRespond(t *testing.T) {
 	}
 	skippy.OnInteraction(interaction, s)
 	
-	if !state.GetAlwaysRespond(channelID) {
+	if !s.State.GetAlwaysRespond(channelID) {
 		t.Error("Always respond should be true")
 	}
 
@@ -73,7 +73,7 @@ func TestToggleAlwaysRespond(t *testing.T) {
 	}
 	skippy.OnInteraction(interaction, s)
 
-	if state.GetAlwaysRespond(channelID) {
+	if s.State.GetAlwaysRespond(channelID) {
 		t.Error("Always respond should be false")
 	}
 }
@@ -242,7 +242,7 @@ func TestTrackGameUsage(t *testing.T) {
 	}
 	skippy.OnInteraction(interaction, s)
 
-	userConfig, exists := config.UserConfigMap[userID]
+	userConfig, exists := s.Config.UserConfigMap[userID]
 	if !exists {
 		t.Fatal("Expected user config to exists")
 	}
@@ -280,7 +280,7 @@ func TestTrackGameUsage(t *testing.T) {
 	}
 	skippy.OnInteraction(interaction, s)
 
-	if _, exists = config.UserConfigMap[userID]; exists {
+	if _, exists = s.Config.UserConfigMap[userID]; exists {
 		t.Error("Expected user config to not exist")
 	}
 }
