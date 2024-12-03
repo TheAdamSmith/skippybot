@@ -3,10 +3,12 @@ package skippy
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
-	"skippybot/components"
 	"time"
+
+	"skippybot/components"
 
 	"github.com/bwmarrin/discordgo"
 	openai "github.com/sashabaranov/go-openai"
@@ -26,10 +28,12 @@ const (
 	DEBOUNCE_DELAY            = 100 * time.Millisecond
 	MIN_GAME_SESSION_DURATION = 10 * time.Minute
 	POLL_INTERVAL             = 1 * time.Minute
+	SKIPPY_INSTRUCTION_PATH   = "./instructions/skippy.md"
+	GLADOS_INSTRUCTION_PATH   = "./instructions/glados.md"
 )
 
 // TODO: need to create option funcs to pass in here and read from env as default?
-func NewSkippy(aiClientKey string, discordToken string) *Skippy {
+func NewSkippy(aiClientKey, discordToken, instructionsFilePath string) *Skippy {
 	session, err := discordgo.New("Bot " + discordToken)
 	if err != nil {
 		log.Fatalln("Unable to get discord client")
@@ -42,9 +46,23 @@ func NewSkippy(aiClientKey string, discordToken string) *Skippy {
 	session.State.TrackMembers = true
 
 	clientConfig := openai.DefaultConfig(aiClientKey)
-	clientConfig.AssistantVersion = "v2"
-	clientConfig.BaseURL = "https://api.groq.com/openai/v1/"
+	// clientConfig.BaseURL = "https://api.groq.com/openai/v1/"
 	aiClient := openai.NewClientWithConfig(clientConfig)
+
+	file, err := os.Open(instructionsFilePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	instructions := string(content)
+
+	log.Println("using instructions: ", instructions)
 
 	// TODO: should read this from the db first
 	config := &Config{
@@ -57,11 +75,12 @@ func NewSkippy(aiClientKey string, discordToken string) *Skippy {
 			time.Hour * 3,
 		},
 		// DefaultModel: "llama3-groq-70b-8192-tool-use-preview",
-		DefaultModel: "llama-3.1-70b-versatile",
-		// DefaultModel:  openai.GPT4o,
-		UserConfigMap: make(map[string]UserConfig),
-		StockAPIKey:   os.Getenv("ALPHA_VANTAGE_API_KEY"),
-		WeatherAPIKey: os.Getenv("WEATHER_API_KEY"),
+		// DefaultModel: "llama-3.1-70b-versatile",
+		BaseInstructions: instructions,
+		DefaultModel:     openai.GPT4o,
+		UserConfigMap:    make(map[string]UserConfig),
+		StockAPIKey:      os.Getenv("ALPHA_VANTAGE_API_KEY"),
+		WeatherAPIKey:    os.Getenv("WEATHER_API_KEY"),
 	}
 
 	log.Println("Connecting to db")
@@ -88,6 +107,7 @@ func NewSkippy(aiClientKey string, discordToken string) *Skippy {
 }
 
 func (s *Skippy) Run() error {
+	
 	err := s.DiscordSession.Open()
 	if err != nil {
 		return fmt.Errorf("error unable to open discord session %w", err)
