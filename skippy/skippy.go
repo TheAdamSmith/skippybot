@@ -14,6 +14,18 @@ import (
 	openai "github.com/sashabaranov/go-openai"
 )
 
+type BotName string
+
+const (
+	DEBOUNCE_DELAY                    = 100 * time.Millisecond
+	MIN_GAME_SESSION_DURATION         = 10 * time.Minute
+	POLL_INTERVAL                     = 1 * time.Minute
+	SKIPPY_INSTRUCTION_PATH           = "./instructions/skippy.md"
+	GLADOS_INSTRUCTION_PATH           = "./instructions/glados.md"
+	GLADOS                    BotName = "GLaDOS"
+	SKIPPY                    BotName = "Skippy"
+)
+
 type Skippy struct {
 	DiscordSession   DiscordSession
 	AIClient         *openai.Client
@@ -24,16 +36,8 @@ type Skippy struct {
 	Scheduler        *Scheduler
 }
 
-const (
-	DEBOUNCE_DELAY            = 100 * time.Millisecond
-	MIN_GAME_SESSION_DURATION = 10 * time.Minute
-	POLL_INTERVAL             = 1 * time.Minute
-	SKIPPY_INSTRUCTION_PATH   = "./instructions/skippy.md"
-	GLADOS_INSTRUCTION_PATH   = "./instructions/glados.md"
-)
-
 // TODO: need to create option funcs to pass in here and read from env as default?
-func NewSkippy(aiClientKey, discordToken, instructionsFilePath string) *Skippy {
+func NewSkippy(aiClientKey, discordToken string, botName BotName) *Skippy {
 	session, err := discordgo.New("Bot " + discordToken)
 	if err != nil {
 		log.Fatalln("Unable to get discord client")
@@ -48,6 +52,16 @@ func NewSkippy(aiClientKey, discordToken, instructionsFilePath string) *Skippy {
 	clientConfig := openai.DefaultConfig(aiClientKey)
 	// clientConfig.BaseURL = "https://api.groq.com/openai/v1/"
 	aiClient := openai.NewClientWithConfig(clientConfig)
+
+	var instructionsFilePath string
+	switch botName {
+	case SKIPPY:
+		instructionsFilePath = SKIPPY_INSTRUCTION_PATH
+	case GLADOS:
+		instructionsFilePath = GLADOS_INSTRUCTION_PATH
+	default:
+		log.Fatal("invalid bot type")
+	}
 
 	file, err := os.Open(instructionsFilePath)
 	if err != nil {
@@ -81,6 +95,7 @@ func NewSkippy(aiClientKey, discordToken, instructionsFilePath string) *Skippy {
 		UserConfigMap:    make(map[string]UserConfig),
 		StockAPIKey:      os.Getenv("ALPHA_VANTAGE_API_KEY"),
 		WeatherAPIKey:    os.Getenv("WEATHER_API_KEY"),
+		Name:             botName,
 	}
 
 	log.Println("Connecting to db")
@@ -107,7 +122,6 @@ func NewSkippy(aiClientKey, discordToken, instructionsFilePath string) *Skippy {
 }
 
 func (s *Skippy) Run() error {
-	
 	err := s.DiscordSession.Open()
 	if err != nil {
 		return fmt.Errorf("error unable to open discord session %w", err)
@@ -133,7 +147,7 @@ func (s *Skippy) Run() error {
 		OnPresenceUpdateDebounce(p, debouncer, s)
 	})
 
-	initSlashCommands(s.DiscordSession)
+	initSlashCommands(s)
 
 	s.Scheduler.Start()
 

@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -28,9 +31,7 @@ const (
 	GAME              = "game"
 )
 
-func initSlashCommands(
-	dg DiscordSession,
-) ([]*discordgo.ApplicationCommand, error) {
+func initSlashCommands(s *Skippy) ([]*discordgo.ApplicationCommand, error) {
 	commands := []*discordgo.ApplicationCommand{
 		{
 			Name:        TRACK_GAME_USEAGE,
@@ -82,7 +83,7 @@ func initSlashCommands(
 		},
 		{
 			Name:        ALWAYS_RESPOND,
-			Description: "Toggle auto respond when on Skippy will always respond to messages in this channel",
+			Description: fmt.Sprintf("Toggle auto respond when on %s will always respond to messages in this channel", s.Config.Name),
 		},
 		{
 			Name:        GAME_STATS,
@@ -110,12 +111,12 @@ func initSlashCommands(
 		},
 		{
 			Name:        HELP,
-			Description: "see what Skippy can do",
+			Description: fmt.Sprintf("see what %s can do", s.Config.Name),
 		},
 	}
 
 	for _, command := range commands {
-		if _, err := dg.ApplicationCommandCreate(dg.GetState().User.ID, "", command); err != nil {
+		if _, err := s.DiscordSession.ApplicationCommandCreate(s.DiscordSession.GetState().User.ID, "", command); err != nil {
 			return nil, fmt.Errorf("error unable to create command %w", err)
 		}
 	}
@@ -144,7 +145,7 @@ func OnInteraction(i *discordgo.InteractionCreate, s *Skippy) {
 			handleSlashCommandError(s.DiscordSession, i, err)
 		}
 	case HELP:
-		if err := handleHelp(s.DiscordSession, i); err != nil {
+		if err := handleHelp(i, s); err != nil {
 			handleSlashCommandError(s.DiscordSession, i, err)
 		}
 	default:
@@ -434,18 +435,42 @@ func handleAlwaysRespond(i *discordgo.InteractionCreate, s *Skippy) {
 	}
 }
 
-func handleHelp(dg DiscordSession, i *discordgo.InteractionCreate) error {
-	if err := sendChunkedChannelMessage(dg, i.ChannelID, GENERAL_HELP); err != nil {
-		return err
+func handleHelp(i *discordgo.InteractionCreate, s *Skippy) error {
+	file, err := os.Open("./instructions/help.md")
+	if err != nil {
+		log.Fatal(err)
 	}
-	if err := sendChunkedChannelMessage(dg, i.ChannelID, AI_FUNCTIONS_HELP); err != nil {
-		return err
-	}
-	if err := sendChunkedChannelMessage(dg, i.ChannelID, COMMANDS_HELP); err != nil {
-		return err
+	defer file.Close()
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	return nil
+	help := string(content)
+	help = strings.ReplaceAll(help, "{BOT_NAME}", string(s.Config.Name))
+	help = strings.ReplaceAll(help, "{BOT_MENTION}", "@" + string(s.Config.Name))
+
+	instructions := fmt.Sprintf(HELP_INSTRUCTIONS, help)
+
+	go getAndSendResponse(
+		context.Background(),
+		s,
+		ResponseReq{
+			ChannelID:              i.ChannelID,
+			UserID:                 i.Member.User.ID,
+			AdditionalInstructions: instructions,
+			DisableTools:           true,
+		},
+	)
+
+	return s.DiscordSession.InteractionRespond(i.Interaction,
+		&discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "helping...",
+			},
+		})
 }
 
 func findCommandOption(

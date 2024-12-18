@@ -104,7 +104,7 @@ func getAndSendResponse(
 
 	s.DiscordSession.ChannelTyping(req.ChannelID)
 
-	response, err := GetResponseV2(
+	response, err := GetResponse(
 		ctx,
 		s,
 		req,

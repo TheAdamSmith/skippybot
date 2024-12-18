@@ -30,23 +30,37 @@ func main() {
 		log.Fatalln("Unable to load env variables")
 	}
 
-	// openAIKey := os.Getenv("OPEN_AI_KEY")
-	openAIKey := os.Getenv("GROQ_API_KEY")
+	openAIKey := os.Getenv("OPEN_AI_KEY")
+	// openAIKey := os.Getenv("GROQ_API_KEY")
 	if openAIKey == "" {
 		log.Fatalln("Unable to get Open AI API Key")
 	}
 
-	token := os.Getenv("DISCORD_TOKEN")
-	if token == "" {
-		log.Fatalln("could not read discord token")
+	var token string
+	var botName skippy.BotName
+	botType := os.Args[1]
+	log.Println(botType)
+	switch botType {
+	case "skippy":
+		token = os.Getenv("SKIPPY_DISCORD_TOKEN")
+		if token == "" {
+			log.Fatalln("could not read discord token")
+		}
+		botName = skippy.SKIPPY
+	case "glados": 
+		token = os.Getenv("GLADOS_DISCORD_TOKEN")
+		if token == "" {
+			log.Fatalln("could not read discord token")
+		}
+		botName = skippy.GLADOS
 	}
 
-	Skippy := skippy.NewSkippy(openAIKey, token)
+	bot := skippy.NewSkippy(openAIKey, token, botName)
 
-	if err = Skippy.Run(); err != nil {
+	if err = bot.Run(); err != nil {
 		log.Fatalf("unable to start skippy %s", err)
 	}
-	defer Skippy.Close()
+	defer bot.Close()
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(

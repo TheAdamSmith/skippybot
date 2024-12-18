@@ -7,7 +7,6 @@ import (
 	"log"
 	"skippybot/components"
 	"sort"
-	"strconv"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -101,15 +100,6 @@ func generateWhensGoodResponse(initialInteraction *discordgo.InteractionCreate, 
 			}
 		})
 
-	var intOptions []discordgo.SelectMenuOption
-	for i := 1; i <= 6; i++ {
-		intOptions = append(intOptions,
-			discordgo.SelectMenuOption{
-				Label: strconv.Itoa(i),
-				Value: strconv.Itoa(i),
-			},
-		)
-	}
 
 	button := s.ComponentHandler.WithSubmitButton(
 		discordgo.Button{
@@ -209,6 +199,7 @@ func getUserAvailability(initialInteraction *discordgo.InteractionCreate, formDa
 	buttonRow := components.ButtonRow(s.DiscordSession, cantButton)
 
 	content, err := getUserAvailabilityContent(initialInteraction, formData, s)
+
 	if err != nil {
 		log.Println("error generating content for user availability message", err)
 	}
@@ -219,22 +210,26 @@ func getUserAvailability(initialInteraction *discordgo.InteractionCreate, formDa
 		content += "\n## Availability" + formData.StartTime.Weekday().String() + ":"
 	}
 
-	s.DiscordSession.ChannelMessageSendComplex(formData.ChannelID, &discordgo.MessageSend{
+	_, err = s.DiscordSession.ChannelMessageSendComplex(formData.ChannelID, &discordgo.MessageSend{
 		Content: content,
 		Components: []discordgo.MessageComponent{
 			timeSelect,
 			buttonRow,
 		},
 	})
+	if err != nil {
+		log.Println("error sending channel message", err)
+	}
 }
 
 func getUserAvailabilityContent(initialInteraction *discordgo.InteractionCreate, formData *WhensGoodForm, s *Skippy) (string, error) {
-	response, err := GetResponseV2(
+	instructions := makeTimeSelectInstructions(formData, initialInteraction)
+	response, err := GetResponse(
 		context.Background(),
 		s,
 		ResponseReq{
 			ChannelID:    initialInteraction.ID,
-			Message:      makeTimeSelectInstructions(formData, initialInteraction),
+			AdditionalInstructions:     	 instructions,
 			DisableTools: true,
 		},
 	)
@@ -312,9 +307,9 @@ func generateAndScheduleEvent(i *discordgo.InteractionCreate, activityName strin
 		content += UserMention(userID)
 	}
 
-	funcArgs, err := GetResponseV2(context.Background(), s, ResponseReq{
+	funcArgs, err := GetResponse(context.Background(), s, ResponseReq{
 		ChannelID:        i.ChannelID,
-		Message:          content,
+		AdditionalInstructions:          content,
 		Tools:            []openai.Tool{GenerateEventTool},
 		RequireTools:     true,
 		ReturnToolOutput: true,
@@ -353,7 +348,7 @@ func getUserAvailabilityFields(userAvailability map[string][]time.Time, commonTi
 		for _, timeSlot := range timeSlots {
 			isCommonTime := false
 			for _, t := range commonTimes {
-				if timeSlot == t {
+				if timeSlot.Equal(t) {
 					isCommonTime = true
 				}
 			}
@@ -464,12 +459,17 @@ func makeTimeSelectInstructions(formData *WhensGoodForm, i *discordgo.Interactio
 	if formData.StartTime.Weekday() != time.Now().Weekday() {
 		day = formData.StartTime.Weekday().String()
 	}
-	return fmt.Sprintf(`you are generating a the message content in an interactive discord message. 
-		%s is asking %s when is a good time for %s on %s. Generate just the content in your response, but be descriptive about the activity and snarky to the users. Do not include the current time.`,
-		i.Member.User.Mention(),
-		users,
+	return fmt.Sprintf(`
+		A user is asking whens good for %s on %s with an interactive discord message.
+		The mention string of the user asking: %s
+		The mention strings for the users they are scheduling with: %s	
+		Please generate a message telling the users this an make sure to include all mention strings
+		generate only the content don't respond directly to this prompt
+		`,
 		formData.Game,
 		day,
+		i.Member.User.Mention(),
+		users,
 	)
 }
 

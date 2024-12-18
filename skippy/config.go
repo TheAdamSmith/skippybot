@@ -18,6 +18,7 @@ type Config struct {
 	UserConfigMap map[string]UserConfig
 	WeatherAPIKey string
 	StockAPIKey   string
+	Name BotName
 }
 
 type UserConfig struct {

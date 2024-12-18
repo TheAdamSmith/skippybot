@@ -123,7 +123,7 @@ func PollPresenceStatus(ctx context.Context, s *Skippy) {
 			}
 
 			content := ""
-			if aiGameSessions == nil || len(aiGameSessions) == 0 {
+			if len(aiGameSessions) == 0 {
 				log.Println("found user over limit without any game sessions. continuing")
 				continue
 			} else {

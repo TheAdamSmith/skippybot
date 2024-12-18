@@ -26,37 +26,10 @@ const (
 	Messages will be sent in this thread that will contain the json results of a rocket league game.
 	Announce the overall score and commentate on the performance of the home team. Come up with creative insults on their performance, but praise high performers
 	`
-	GENERAL_HELP = "# Skippybot\n\n" +
-		"An AI Discord bot built using ChatGPT with a personality modeled after Skippy the Magnficent from Craig Alanson's " +
-		"[Expeditionary Force](https://www.amazon.com/Expeditionary-Force-17-book-series/dp/B07F7T8NPK)\n\n" +
-
-		"## Functionality\n\n" +
-		"Skippy has a lot of different functionality with an emphasis on gaming related tasks.\n\n" +
-
-		"You can ask Skippy questions just like you would any chat bot.\n" +
-		"By default Skippy only responds to @ messages: `@Skippy what is the meaning of the universe?`\n" +
-		"Skippy can answer any questions that you would be able to ask ChatGPT\n\n"
-
-	AI_FUNCTIONS_HELP = "### AI Functions\n\n" +
-		"Skippy has several different functions that can be invoked by asking him.\n\n" +
-
-		"- Get the price of a stock the AI needs to be able to resolve the ticker. ex: `@Skippy what is the price of gamestop?`\n" +
-		"- Get the weather. ex: `@Skippy what is the weather in Thompson Corners, Maine?`\n" +
-		"- Set a reminder. ex: `@Skippy can you remind me in 30 minutes to take out the trash?`\n" +
-		"    - When you set a reminder Skippy will remind you in the channel that you asked for the reminder. " +
-		"You must acknowledge that you have received the reminder or else Skippy will continue to remind you about it\n" +
-		"- Set a morning message. Skippy will send a morning message in the channel you sent the message in. " +
-		"You can optionally specify locations to fetch the weather from and stocks to get the price for. ex: `@Skippy can you set the morning message for 9:00 am? Get the weather for Thompson Corner, Maine and the stock price for gamestop`\n" +
-		"- Generate an image. Skippy can generate an image for you. This feature is a work in progress. ex: `@Skippy can you generate an image of a fun party banana?`\n\n"
-
-	COMMANDS_HELP = "### Discord Commands\n\n" +
-		"Skippy has several built in discord commands with various functions. You can see these commands by starting a message with `/`\n\n" +
-
-		"- `/always_respond` this toggles if Skippy responds to all messages or just messages with an `@Skippy`\n" +
-		"- `/send_message` use this to send an unprompted message to a channel of your choice. Can optionally have Skippy @ certain users\n" +
-		"- `/track_game_usage` this enables Skippy's game tracking feature. Skippy will track your video game playing through Discord presence updates " +
-		"(you must be sharing your status with Discord for this feature to work). Optionally can set a daily limit that when reached Skippy will send " +
-		"you a message notifying you. This will default to a DM, but you can specify a channel you would like to get this reminder in.\n" +
-		"- `/game_stats` This command will fetch your game stats. Defaults to today's stats, but can optionally specify the number of days to fetch your stats.\n" +
-		"- `/whens_good` This command starts an interaction flow that can be used for scheduling a time for people to play games (or any other activity together)."
+	// TODO: FIX THE HELP MENU
+	HELP_INSTRUCTIONS = `
+		Here is a description of your functionality as a discord bot. Please use this to generate a help message describing to a user who you are and what you can do. 
+		Keep the description as accurate as possible. Include the examples.
+		The text wrapped in {required} must be included without editing it, but do not include the {required}. 
+		\n%s`
 )

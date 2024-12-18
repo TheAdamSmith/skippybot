@@ -7,11 +7,10 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"skippybot/skippy"
 	"strings"
 	"testing"
 	"time"
-
-	"skippybot/skippy"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
@@ -21,12 +20,14 @@ import (
 )
 
 const (
-	BOT_ID   = "BOT"
-	letters  = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	USERNAME = "cap_lapse"
-	GAME     = "Outer Wilds"
-	USER_ID  = "USERID"
-	GUILD_ID = "GUILDID"
+	BOT_ID                  = "BOT"
+	letters                 = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	SKIPPY_INSTRUCTION_PATH = "../instructions/skippy.md"
+	GLADOS_INSTRUCTION_PATH = "../instructions/glados.md"
+	USERNAME                = "cap_lapse"
+	GAME                    = "Outer Wilds"
+	USER_ID                 = "USERID"
+	GUILD_ID                = "GUILDID"
 )
 
 // these variables are shared between tests which is intentional
@@ -35,10 +36,12 @@ var (
 	s             *skippy.Skippy
 	dg            *MockDiscordSession
 	enableLogging bool
+	botName       *string
 )
 
 func init() {
 	flag.BoolVar(&enableLogging, "log", false, "enable logging")
+	botName = flag.String("bot", "glados", "skippy or glados")
 }
 
 func TestMain(m *testing.M) {
@@ -146,6 +149,28 @@ func setup() (
 		WeeklyLimit: 1 * time.Second,
 	}
 
+	var instructionsFilePath string
+	switch *botName {
+	case strings.ToLower(string(skippy.SKIPPY)):
+		instructionsFilePath = SKIPPY_INSTRUCTION_PATH
+	case strings.ToLower(string(skippy.GLADOS)):
+		instructionsFilePath = GLADOS_INSTRUCTION_PATH
+	default:
+		log.Fatal("invalid bot type")
+	}
+
+	file, err := os.Open(instructionsFilePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	instructions := string(content)
 	config := &skippy.Config{
 		MinGameSessionDuration:     time.Nanosecond * 1,
 		PresenceUpdateDebouncDelay: time.Millisecond * 100,
@@ -155,10 +180,11 @@ func setup() (
 			time.Hour,
 		},
 		// DefaultModel:  "llama-3.1-70b-versatile",
-		DefaultModel:  openai.GPT4o,
-		UserConfigMap: userConfigMap,
-		StockAPIKey:   os.Getenv("ALPHA_VANTAGE_API_KEY"),
-		WeatherAPIKey: os.Getenv("WEATHER_API_KEY"),
+		BaseInstructions: instructions,
+		DefaultModel:     openai.GPT4o,
+		UserConfigMap:    userConfigMap,
+		StockAPIKey:      os.Getenv("ALPHA_VANTAGE_API_KEY"),
+		WeatherAPIKey:    os.Getenv("WEATHER_API_KEY"),
 	}
 	s = &skippy.Skippy{
 		DiscordSession: dg,

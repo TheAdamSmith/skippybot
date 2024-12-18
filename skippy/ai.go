@@ -31,7 +31,7 @@ type ToolChoice interface {
 	string | openai.ToolChoice
 }
 
-func GetResponseV2(ctx context.Context, s *Skippy, req ResponseReq) (string, error) {
+func GetResponse(ctx context.Context, s *Skippy, req ResponseReq) (string, error) {
 	var messages []openai.ChatCompletionMessage
 
 	thread, ok := s.State.GetThread(req.ChannelID)
@@ -74,10 +74,12 @@ func GetResponseV2(ctx context.Context, s *Skippy, req ResponseReq) (string, err
 		}
 	}
 
-	messages = append(messages, openai.ChatCompletionMessage{
-		Role:    openai.ChatMessageRoleUser,
-		Content: req.Message,
-	})
+	if req.Message != "" {
+		messages = append(messages, openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleUser,
+			Content: req.Message,
+		})
+	}
 
 	completionReq := openai.ChatCompletionRequest{
 		ToolChoice: toolChoice,
@@ -95,9 +97,12 @@ func GetResponseV2(ctx context.Context, s *Skippy, req ResponseReq) (string, err
 	log.Println("tokens used: ", resp.Usage.TotalTokens)
 
 	choice := resp.Choices[0]
+
 	messages = append(messages, choice.Message)
 
-	if choice.FinishReason == openai.FinishReasonToolCalls {
+	// if prompted only with a system message and tool calls are required the model is returning with 
+	// stopped while attempting to call a function
+	if choice.FinishReason == openai.FinishReasonToolCalls || (req.RequireTools && choice.FinishReason == openai.FinishReasonStop) {
 		log.Println("Recieved tool call")
 		if req.ReturnToolOutput {
 			return choice.Message.ToolCalls[0].Function.Arguments, nil
@@ -139,6 +144,7 @@ func addTimeAndUserID(messages []openai.ChatCompletionMessage, userID string) []
 	if userID != "" {
 		content += fmt.Sprintf(", Current User: %s", UserMention(userID))
 	}
+
 	return append(messages, openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleSystem,
 		Content: content,
