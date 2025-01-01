@@ -4,18 +4,11 @@ import (
 	"io"
 	"log"
 	"os"
-	"time"
+	"os/signal"
+	"skippybot/skippy"
+	"syscall"
 
 	"github.com/joho/godotenv"
-
-	skippy "skippybot/skippy"
-
-	openai "github.com/sashabaranov/go-openai"
-)
-
-const (
-	DEBOUNCE_DELAY            = 100 * time.Millisecond
-	MIN_GAME_SESSION_DURATION = 10 * time.Minute
 )
 
 func main() {
@@ -38,51 +31,44 @@ func main() {
 	}
 
 	openAIKey := os.Getenv("OPEN_AI_KEY")
+	// openAIKey := os.Getenv("GROQ_API_KEY")
 	if openAIKey == "" {
 		log.Fatalln("Unable to get Open AI API Key")
 	}
 
-	token := os.Getenv("DISCORD_TOKEN")
-	if token == "" {
-		log.Fatalln("could not read discord token")
+	var token string
+	var botName skippy.BotName
+	botType := os.Args[1]
+	log.Println(botType)
+	switch botType {
+	case "skippy":
+		token = os.Getenv("SKIPPY_DISCORD_TOKEN")
+		if token == "" {
+			log.Fatalln("could not read discord token")
+		}
+		botName = skippy.SKIPPY
+	case "glados": 
+		token = os.Getenv("GLADOS_DISCORD_TOKEN")
+		if token == "" {
+			log.Fatalln("could not read discord token")
+		}
+		botName = skippy.GLADOS
 	}
 
-	assistantID := os.Getenv("ASSISTANT_ID")
-	if assistantID == "" {
-		log.Fatalln("could not read Assistant ID")
+	bot := skippy.NewSkippy(openAIKey, token, botName)
+
+	if err = bot.Run(); err != nil {
+		log.Fatalf("unable to start skippy %s", err)
 	}
+	defer bot.Close()
 
-	stockPriceAPIKey := os.Getenv("ALPHA_VANTAGE_API_KEY")
-	weatherAPIKey := os.Getenv("WEATHER_API_KEY")
-	clientConfig := openai.DefaultConfig(openAIKey)
-	clientConfig.AssistantVersion = "v2"
-	client := openai.NewClientWithConfig(clientConfig)
-
-	log.Println("Connecting to db")
-	db, err := skippy.NewDB("sqlite", "skippy.db")
-	if err != nil {
-		log.Fatalln("Unable to get database connection", err)
-	}
-
-	config := &skippy.Config{
-		PresenceUpdateDebouncDelay: DEBOUNCE_DELAY,
-		MinGameSessionDuration:     MIN_GAME_SESSION_DURATION,
-		ReminderDurations: []time.Duration{
-			time.Minute * 10,
-			time.Minute * 30,
-			time.Minute * 90,
-			time.Hour * 3,
-		},
-		OpenAIModel:   openai.GPT4o,
-		UserConfigMap: make(map[string]skippy.UserConfig),
-	}
-
-	skippy.RunDiscord(
-		token,
-		assistantID,
-		stockPriceAPIKey,
-		weatherAPIKey,
-		client,
-		config,
-		db)
+	sc := make(chan os.Signal, 1)
+	signal.Notify(
+		sc,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+	<-sc
 }

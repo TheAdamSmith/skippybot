@@ -7,11 +7,10 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"skippybot/skippy"
 	"strings"
 	"testing"
 	"time"
-
-	"skippybot/skippy"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
@@ -21,28 +20,28 @@ import (
 )
 
 const (
-	BOT_ID   = "BOT"
-	letters  = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	USERNAME = "cap_lapse"
-	GAME     = "Outer Wilds"
-	USER_ID  = "USERID"
-	GUILD_ID = "GUILDID"
+	BOT_ID                  = "BOT"
+	letters                 = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	SKIPPY_INSTRUCTION_PATH = "../instructions/skippy.md"
+	GLADOS_INSTRUCTION_PATH = "../instructions/glados.md"
+	USERNAME                = "cap_lapse"
+	GAME                    = "Outer Wilds"
+	USER_ID                 = "USERID"
+	GUILD_ID                = "GUILDID"
 )
 
 // these variables are shared between tests which is intentional
 // they simulate a live discord environment
 var (
-	client        *openai.Client
-	state         *skippy.State
+	s             *skippy.Skippy
 	dg            *MockDiscordSession
-	db            skippy.Database
-	scheduler     *skippy.Scheduler
-	config        *skippy.Config
 	enableLogging bool
+	botName       *string
 )
 
 func init() {
 	flag.BoolVar(&enableLogging, "log", false, "enable logging")
+	botName = flag.String("bot", "glados", "skippy or glados")
 }
 
 func TestMain(m *testing.M) {
@@ -51,7 +50,7 @@ func TestMain(m *testing.M) {
 		log.SetOutput(io.Discard)
 	}
 	var err error
-	dg, client, state, db, scheduler, config, err = setup()
+	s, err = setup()
 	defer teardown()
 	if err != nil {
 		fmt.Println(err)
@@ -69,12 +68,7 @@ func GenerateRandomID(n int) string {
 }
 
 func setup() (
-	dg *MockDiscordSession,
-	client *openai.Client,
-	state *skippy.State,
-	db skippy.Database,
-	scheduler *skippy.Scheduler,
-	config *skippy.Config, err error,
+	s *skippy.Skippy, err error,
 ) {
 	dg = &MockDiscordSession{
 		channelMessages:     make(map[string][]string),
@@ -111,6 +105,7 @@ func setup() (
 	}
 
 	openAIKey := os.Getenv("OPEN_AI_KEY")
+	// openAIKey := os.Getenv("GROQ_API_KEY")
 	if openAIKey == "" {
 		err = fmt.Errorf("unable to get Open AI API Key")
 		return
@@ -123,19 +118,25 @@ func setup() (
 	}
 
 	clientConfig := openai.DefaultConfig(openAIKey)
-	clientConfig.AssistantVersion = "v2"
-	client = openai.NewClientWithConfig(clientConfig)
-	state = skippy.NewState(assistantID, "", "", "")
+	// clientConfig.BaseURL = "https://api.groq.com/openai/v1/"
+	client := openai.NewClientWithConfig(clientConfig)
+	state := skippy.NewState()
 
-	mrog, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	mrog, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	if err != nil {
+		log.Println(err)
 		return
 	}
 
-	mrog.AutoMigrate(&skippy.GameSession{})
-	db = &skippy.DB{DB: mrog}
+	err = mrog.AutoMigrate(&skippy.GameSession{})
+	if err != nil {
+		log.Println(err)
+		return
 
-	scheduler, err = skippy.NewScheduler()
+	}
+	db := &skippy.DB{DB: mrog}
+
+	scheduler, err := skippy.NewScheduler()
 	if err != nil {
 		return
 	}
@@ -148,7 +149,29 @@ func setup() (
 		WeeklyLimit: 1 * time.Second,
 	}
 
-	config = &skippy.Config{
+	var instructionsFilePath string
+	switch *botName {
+	case strings.ToLower(string(skippy.SKIPPY)):
+		instructionsFilePath = SKIPPY_INSTRUCTION_PATH
+	case strings.ToLower(string(skippy.GLADOS)):
+		instructionsFilePath = GLADOS_INSTRUCTION_PATH
+	default:
+		log.Fatal("invalid bot type")
+	}
+
+	file, err := os.Open(instructionsFilePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	instructions := string(content)
+	config := &skippy.Config{
 		MinGameSessionDuration:     time.Nanosecond * 1,
 		PresenceUpdateDebouncDelay: time.Millisecond * 100,
 		ReminderDurations: []time.Duration{
@@ -156,15 +179,26 @@ func setup() (
 			time.Millisecond * 50,
 			time.Hour,
 		},
-		OpenAIModel:   openai.GPT3Dot5Turbo,
-		UserConfigMap: userConfigMap,
+		// DefaultModel:  "llama-3.1-70b-versatile",
+		BaseInstructions: instructions,
+		DefaultModel:     openai.GPT4o,
+		UserConfigMap:    userConfigMap,
+		StockAPIKey:      os.Getenv("ALPHA_VANTAGE_API_KEY"),
+		WeatherAPIKey:    os.Getenv("WEATHER_API_KEY"),
 	}
-
+	s = &skippy.Skippy{
+		DiscordSession: dg,
+		AIClient:       client,
+		Config:         config,
+		State:          state,
+		DB:             db,
+		Scheduler:      scheduler,
+	}
 	return
 }
 
 func teardown() {
-	err := db.Close()
+	err := s.DB.Close()
 	if err != nil {
 		fmt.Println("unable to close db connection: ", err)
 	}
@@ -188,6 +222,7 @@ func generateTestData(
 			StartedAt: startTime,
 			Duration:  duration,
 		}
+		log.Println(session)
 		db.CreateGameSession(&session)
 	}
 }

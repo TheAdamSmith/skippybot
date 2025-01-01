@@ -8,9 +8,17 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
+
+func UserMention(userID string) string {
+	if strings.HasPrefix(userID, "<@") && strings.HasSuffix(userID, ">") {
+		return userID
+	}
+	return fmt.Sprintf("<@%s>", userID)
+}
 
 func removeBotMention(content string, botID string) string {
 	mentionPattern := fmt.Sprintf("<@%s>", botID)
@@ -58,6 +66,22 @@ func isMentioned(mentions []*discordgo.User, currUser *discordgo.User) bool {
 		}
 	}
 	return false
+}
+
+func ParseCommonTime(timeString string) (time.Time, error) {
+	timeFmt := "15:04"
+	parsedTime, err := time.Parse(timeFmt, timeString)
+	if err != nil {
+		log.Printf("could not format time: %s. attempting to use AM/PM format", err)
+
+		timeFmt := "3:04 PM"
+		parsedTime, err = time.Parse(timeFmt, timeString)
+		if err != nil {
+			return parsedTime, err
+		}
+	}
+
+	return parsedTime, nil
 }
 
 //lint:ignore U1000 saving for later

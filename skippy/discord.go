@@ -3,99 +3,15 @@ package skippy
 import (
 	"context"
 	"log"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
-
-	openai "github.com/sashabaranov/go-openai"
 
 	"github.com/bwmarrin/discordgo"
 )
 
+// TODO: rename file
 const (
 	ERROR_RESPONSE   = "Oh no! Something went wrong."
 	EVERYONE_MENTION = "@everyone"
-	POLL_INTERVAL    = 1 * time.Minute
 )
-
-func RunDiscord(
-	token string,
-	assistantID string,
-	stockAPIKey string,
-	weatherAPIKey string,
-	client *openai.Client,
-	config *Config,
-	db Database,
-) {
-	session, err := discordgo.New("Bot " + token)
-	if err != nil {
-		log.Fatalln("Unable to get discord client")
-	}
-
-	// TODO: scope down intents
-	session.Identify.Intents = discordgo.IntentsAll
-
-	err = session.Open()
-	if err != nil {
-		log.Fatalln("Unable to open discord client", err.Error())
-	}
-	defer session.Close()
-
-	session.State.TrackPresences = true
-	session.State.TrackChannels = true
-	session.State.TrackMembers = true
-
-	dg := NewDiscordBot(session)
-
-	state := NewState(assistantID, token, stockAPIKey, weatherAPIKey, dg)
-	// TODO: fix
-	state.openAIModel = config.OpenAIModel
-
-	scheduler, err := NewScheduler()
-	if err != nil {
-		log.Fatal("could not create scheduler", err)
-	}
-	scheduler.Start()
-
-	scheduler.AddDurationJob(POLL_INTERVAL, func() {
-		pollPresenceStatus(context.Background(), dg, client, state, db, config)
-	})
-
-	dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
-		messageCreate(dg, m, client, state, scheduler, config)
-	})
-
-	dg.AddHandler(
-		func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-			switch i.Type {
-			case discordgo.InteractionApplicationCommand:
-				onCommand(dg, i, client, state, db, config)
-			}
-		},
-	)
-
-	// discord presence update repeates calls rapidly
-	// might be from multiple servers so debounce the calls
-	debouncer := NewDebouncer(config.PresenceUpdateDebouncDelay)
-	dg.AddHandler(func(s *discordgo.Session, p *discordgo.PresenceUpdate) {
-		onPresenceUpdateDebounce(dg, p, state, db, debouncer, config)
-	})
-
-	// deleteSlashCommands(dg)
-	initSlashCommands(session)
-
-	log.Println("Bot is now running. Press CTRL+C to exit.")
-	sc := make(chan os.Signal, 1)
-	signal.Notify(
-		sc,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		os.Interrupt,
-		syscall.SIGTERM,
-	)
-	<-sc
-}
 
 func sendChunkedChannelMessage(
 	dg DiscordSession,
@@ -125,151 +41,79 @@ func sendChunkedChannelMessage(
 	return nil
 }
 
-func messageCreate(
-	dg DiscordSession,
-	m *discordgo.MessageCreate,
-	client *openai.Client,
-	state *State,
-	scheduler *Scheduler,
-	config *Config,
-) {
+func OnMessageCreate(m *discordgo.MessageCreate, s *Skippy) {
 	log.Printf("Recieved Message: %s\n", m.Content)
 
-	thread, threadExists := state.GetThread(m.ChannelID)
+	thread, threadExists := s.State.GetThread(m.ChannelID)
 
 	// Ignore all messages created by the bot itself
-	if m.Author.ID == dg.GetState().User.ID {
+	if m.Author.ID == s.DiscordSession.GetState().User.ID {
 		return
 	}
 
 	if threadExists && thread.awaitsResponse {
-		messageReq := openai.MessageRequest{
-			Role:    openai.ChatMessageRoleUser,
-			Content: m.Content,
-		}
 		getAndSendResponse(
 			context.Background(),
-			dg,
-			m.ChannelID,
-			messageReq,
-			DEFAULT_INSTRUCTIONS,
-			client,
-			state,
-			scheduler,
-			config,
+			s,
+			ResponseReq{
+				ChannelID: m.ChannelID,
+				UserID:    m.Author.ID,
+				Message:   m.Content,
+			},
 		)
 		// value used by reminders to see if it needs to send another message to user
-		state.SetAwaitsResponse(m.ChannelID, false, client)
-		scheduler.CancelReminderJob(m.ChannelID)
+		s.State.SetAwaitsResponse(m.ChannelID, false, s.AIClient)
+		s.Scheduler.CancelReminderJob(m.ChannelID)
 	}
 
-	role, roleMentioned := isRoleMentioned(dg, m)
+	role, roleMentioned := isRoleMentioned(s.DiscordSession, m)
 
-	isMentioned := isMentioned(m.Mentions, dg.GetState().User) || roleMentioned
+	isMentioned := isMentioned(m.Mentions, s.DiscordSession.GetState().User) || roleMentioned
 	alwaysRespond := threadExists && thread.alwaysRespond
 	if !isMentioned && !alwaysRespond {
 		return
 	}
 
-	message := removeBotMention(m.Content, dg.GetState().User.ID)
+	message := removeBotMention(m.Content, s.DiscordSession.GetState().User.ID)
 	message = removeRoleMention(message, role)
+	// TODO: why did I have this here?
 	message = replaceChannelIDs(message, m.MentionChannels)
-	message += "\n current time: "
-
-	// TODO: put in instructions
-	format := "Monday, Jan 02 at 03:04 PM"
-	message += time.Now().Format(format)
-	message += "\n User ID: " + m.Author.Mention()
 
 	log.Println("using message: ", message)
 
 	log.Println("CHANELLID: ", m.ChannelID)
-	messageReq := openai.MessageRequest{
-		Role:    openai.ChatMessageRoleUser,
-		Content: message,
+	err := getAndSendResponse(context.Background(), s, ResponseReq{
+		ChannelID: m.ChannelID,
+		UserID:    m.Author.ID,
+		Message:   message,
+	})
+	if err != nil {
+		log.Println(err)
+		return
 	}
-	getAndSendResponse(
-		context.Background(),
-		dg,
-		m.ChannelID,
-		messageReq,
-		DEFAULT_INSTRUCTIONS,
-		client,
-		state,
-		scheduler,
-		config,
-	)
 }
 
 // Gets response from ai disables functions calls.
 // Only capable of getting and sending a response
-func getAndSendResponseWithoutTools(
-	ctx context.Context,
-	dg DiscordSession,
-	dgChannID string,
-	messageReq openai.MessageRequest,
-	additionalInstructions string,
-	client *openai.Client,
-	state *State,
-) error {
-	log.Printf("Using message: %s\n", messageReq.Content)
-
-	log.Println("Attempting to get response...")
-
-	response, err := GetResponse(
-		ctx,
-		dg,
-		dgChannID,
-		messageReq,
-		additionalInstructions,
-		true,
-		client,
-		state,
-		// TODO: find a better way to pass this optionally
-		nil,
-		nil,
-	)
-	if err != nil {
-		log.Println("Unable to get response: ", err)
-		response = ERROR_RESPONSE
-	}
-
-	err = sendChunkedChannelMessage(dg, dgChannID, response)
-	return err
-}
-
 func getAndSendResponse(
 	ctx context.Context,
-	dg DiscordSession,
-	dgChannID string,
-	messageReq openai.MessageRequest,
-	additionalInstructions string,
-	client *openai.Client,
-	state *State,
-	scheduler *Scheduler,
-	config *Config,
+	s *Skippy,
+	req ResponseReq,
 ) error {
-	log.Printf("Using message: %s\n", messageReq.Content)
+	log.Printf("Using message: %s\n Attempting to get response...", req.Message)
 
-	log.Println("Attempting to get response...")
+	s.DiscordSession.ChannelTyping(req.ChannelID)
 
 	response, err := GetResponse(
 		ctx,
-		dg,
-		dgChannID,
-		messageReq,
-		additionalInstructions,
-		false,
-		client,
-		state,
-		scheduler,
-		config,
+		s,
+		req,
 	)
 	if err != nil {
 		log.Println("Unable to get response: ", err)
 		response = ERROR_RESPONSE
 	}
 
-	err = sendChunkedChannelMessage(dg, dgChannID, response)
+	err = sendChunkedChannelMessage(s.DiscordSession, req.ChannelID, response)
 	return err
 }

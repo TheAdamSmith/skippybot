@@ -27,8 +27,8 @@ func TestOnPresenceUpdate(t *testing.T) {
 		},
 	}
 
-	skippy.OnPresenceUpdate(dg, presenceUpdate, state, db, config)
-	userPresence, exists := state.GetPresence(USER_ID)
+	skippy.OnPresenceUpdate(presenceUpdate, s)
+	userPresence, exists := s.State.GetPresence(USER_ID)
 
 	if !exists {
 		t.Fatal("expected presence to exist")
@@ -47,8 +47,8 @@ func TestOnPresenceUpdate(t *testing.T) {
 			Activities: []*discordgo.Activity{},
 		},
 	}
-	skippy.OnPresenceUpdate(dg, presenceUpdate, state, db, config)
-	userPresence, exists = state.GetPresence(USER_ID)
+	skippy.OnPresenceUpdate(presenceUpdate, s)
+	userPresence, exists = s.State.GetPresence(USER_ID)
 
 	if !exists {
 		t.Fatal("expected presence to exist")
@@ -58,7 +58,7 @@ func TestOnPresenceUpdate(t *testing.T) {
 		t.Fatal("expected user presence to not be playing game")
 	}
 
-	gameSessions, err := db.GetGameSessionsByUser(USER_ID)
+	gameSessions, err := s.DB.GetGameSessionsByUser(USER_ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestOnPresenceUpdate(t *testing.T) {
 
 	// return the channel id as the user id for
 	for _, gameSession := range gameSessions {
-		db.DeleteGameSession(gameSession.ID)
+		s.DB.DeleteGameSession(gameSession.ID)
 	}
 }
 
@@ -96,18 +96,13 @@ func TestOnPresenceUpdateDebounce(t *testing.T) {
 	debouncer := skippy.NewDebouncer(100 * time.Millisecond)
 	for i := 0; i < 3; i++ {
 		go skippy.OnPresenceUpdateDebounce(
-			dg,
-			presenceUpdate,
-			state,
-			db,
-			debouncer,
-			config,
+			presenceUpdate, debouncer, s,
 		)
 		time.Sleep(time.Millisecond * 50)
 	}
 
 	time.Sleep(time.Millisecond * 100)
-	userPresence, exists := state.GetPresence(USER_ID)
+	userPresence, exists := s.State.GetPresence(USER_ID)
 	if !exists {
 		t.Fatal("expected presence to exist")
 	}
@@ -128,18 +123,13 @@ func TestOnPresenceUpdateDebounce(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		go skippy.OnPresenceUpdateDebounce(
-			dg,
-			presenceUpdate,
-			state,
-			db,
-			debouncer,
-			config,
+			presenceUpdate, debouncer, s,
 		)
 		time.Sleep(time.Millisecond * 50)
 	}
 	time.Sleep(time.Millisecond * 100)
 
-	userPresence, exists = state.GetPresence(USER_ID)
+	userPresence, exists = s.State.GetPresence(USER_ID)
 	if !exists {
 		t.Fatal("expected presence to exist")
 	}
@@ -148,7 +138,7 @@ func TestOnPresenceUpdateDebounce(t *testing.T) {
 		t.Fatal("expected user presence to not be playing game")
 	}
 
-	gameSessions, err := db.GetGameSessionsByUser(USER_ID)
+	gameSessions, err := s.DB.GetGameSessionsByUser(USER_ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,26 +155,26 @@ func TestOnPresenceUpdateDebounce(t *testing.T) {
 	}
 
 	for _, gameSession := range gameSessions {
-		db.DeleteGameSession(gameSession.ID)
+		s.DB.DeleteGameSession(gameSession.ID)
 	}
 }
 
 func TestPollPresence(t *testing.T) {
 	t.Parallel()
 
-	skippy.PollPresenceStatus(context.Background(), dg, client, state, db, config)
+	skippy.PollPresenceStatus(context.Background(), s)
 	if len(dg.channelMessages[USER_ID]) != 0 {
 		t.Fatal("expected message to be sent not be on user channel")
 	}
 
-	state.UpdatePresence(
+	s.State.UpdatePresence(
 		USER_ID,
 		skippy.WithGame("Rocket League"),
 		skippy.WithTimeStarted(time.Now().Add(-2*time.Hour)),
 		skippy.WithIsPlayingGame(true),
 	)
 
-	skippy.PollPresenceStatus(context.Background(), dg, client, state, db, config)
+	skippy.PollPresenceStatus(context.Background(), s)
 	if len(dg.channelMessages[USER_ID]) != 1 {
 		t.Fatal("expected message to be sent on user channel")
 	}
@@ -193,13 +183,13 @@ func TestPollPresence(t *testing.T) {
 		t.Error("expected channel typing to be called on user channel")
 	}
 
-	skippy.PollPresenceStatus(context.Background(), dg, client, state, db, config)
+	skippy.PollPresenceStatus(context.Background(), s)
 	if len(dg.channelMessages[USER_ID]) != 1 {
 		t.Fatal("expected message to not be sent on user channel again")
 	}
 
 	// reset the state so we can test db
-	state.UpdatePresence(
+	s.State.UpdatePresence(
 		USER_ID,
 		skippy.WithGame(""),
 		skippy.WithTimeStarted(time.Time{}),
@@ -207,15 +197,15 @@ func TestPollPresence(t *testing.T) {
 		skippy.WithLastLimitReminder(time.Time{}),
 	)
 
-	skippy.PollPresenceStatus(context.Background(), dg, client, state, db, config)
+	skippy.PollPresenceStatus(context.Background(), s)
 	if len(dg.channelMessages[USER_ID]) != 1 {
 		t.Fatal("expected message to not be sent on user channel again")
 	}
 
 	games := []string{"Valorant", "Rocket League"}
-	generateTestData(db, USER_ID, time.Hour, games)
+	generateTestData(s.DB, USER_ID, time.Hour, games)
 
-	skippy.PollPresenceStatus(context.Background(), dg, client, state, db, config)
+	skippy.PollPresenceStatus(context.Background(), s)
 	if len(dg.channelMessages[USER_ID]) != 2 {
 		t.Fatal("expected message to be sent on user channel again")
 	}

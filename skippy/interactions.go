@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
+	"strings"
 	"time"
-
-	openai "github.com/sashabaranov/go-openai"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -31,9 +31,7 @@ const (
 	GAME              = "game"
 )
 
-func initSlashCommands(
-	dg *discordgo.Session,
-) ([]*discordgo.ApplicationCommand, error) {
+func initSlashCommands(s *Skippy) ([]*discordgo.ApplicationCommand, error) {
 	commands := []*discordgo.ApplicationCommand{
 		{
 			Name:        TRACK_GAME_USEAGE,
@@ -85,7 +83,7 @@ func initSlashCommands(
 		},
 		{
 			Name:        ALWAYS_RESPOND,
-			Description: "Toggle auto respond when on Skippy will always respond to messages in this channel",
+			Description: fmt.Sprintf("Toggle auto respond when on %s will always respond to messages in this channel", s.Config.Name),
 		},
 		{
 			Name:        GAME_STATS,
@@ -99,19 +97,6 @@ func initSlashCommands(
 				},
 			},
 		},
-		// TODO: should prob remove?
-		// {
-		// 	Name:        RL_SESH,
-		// 	Description: "start/stop rl sesh",
-		// 	Options: []*discordgo.ApplicationCommandOption{
-		// 		{
-		// 			Type:        discordgo.ApplicationCommandOptionString,
-		// 			Name:        START_OR_STOP,
-		// 			Description: "should be either start or stop",
-		// 			Required:    false,
-		// 		},
-		// 	},
-		// },
 		{
 			Name:        WHENS_GOOD,
 			Description: "found out whens good",
@@ -126,12 +111,12 @@ func initSlashCommands(
 		},
 		{
 			Name:        HELP,
-			Description: "see what Skippy can do",
+			Description: fmt.Sprintf("see what %s can do", s.Config.Name),
 		},
 	}
 
 	for _, command := range commands {
-		if _, err := dg.ApplicationCommandCreate(dg.State.User.ID, "", command); err != nil {
+		if _, err := s.DiscordSession.ApplicationCommandCreate(s.DiscordSession.GetState().User.ID, "", command); err != nil {
 			return nil, fmt.Errorf("error unable to create command %w", err)
 		}
 	}
@@ -139,44 +124,33 @@ func initSlashCommands(
 	return commands, nil
 }
 
-func onCommand(
-	dg DiscordSession,
-	i *discordgo.InteractionCreate,
-	client *openai.Client,
-	state *State,
-	db Database,
-	config *Config,
-) {
+func OnInteraction(i *discordgo.InteractionCreate, s *Skippy) {
 	log.Println(i.ApplicationCommandData().Name)
 	switch i.ApplicationCommandData().Name {
-	case RL_SESH:
-		if err := handleRLSesh(dg, i, client, state, config); err != nil {
-			handleSlashCommandError(dg, i, err)
-		}
 	case ALWAYS_RESPOND:
 		// should not error
-		handleAlwaysRespond(dg, i, client, state)
+		handleAlwaysRespond(i, s)
 	case TRACK_GAME_USEAGE:
-		toggleGameTracking(dg, i, config)
+		toggleGameTracking(i, s)
 	case SEND_MESSAGE:
-		if err := sendChannelMessage(dg, i, client, state); err != nil {
-			handleSlashCommandError(dg, i, err)
+		if err := sendChannelMessage(i, s); err != nil {
+			handleSlashCommandError(s.DiscordSession, i, err)
 		}
 	case GAME_STATS:
-		if err := generateGameStats(dg, i, client, state, db); err != nil {
-			handleSlashCommandError(dg, i, err)
+		if err := generateGameStats(i, s); err != nil {
+			handleSlashCommandError(s.DiscordSession, i, err)
 		}
 	case WHENS_GOOD:
-		if err := handleWhensGood(dg, i, state, client); err != nil {
-			handleSlashCommandError(dg, i, err)
+		if err := handleWhensGood(i, s); err != nil {
+			handleSlashCommandError(s.DiscordSession, i, err)
 		}
 	case HELP:
-		if err := handleHelp(dg, i); err != nil {
-			handleSlashCommandError(dg, i, err)
+		if err := handleHelp(i, s); err != nil {
+			handleSlashCommandError(s.DiscordSession, i, err)
 		}
 	default:
 		log.Println("recieved unrecognized command")
-		err := dg.InteractionRespond(i.Interaction,
+		err := s.DiscordSession.InteractionRespond(i.Interaction,
 			&discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
@@ -209,13 +183,7 @@ func handleSlashCommandError(
 	}
 }
 
-func generateGameStats(
-	dg DiscordSession,
-	i *discordgo.InteractionCreate,
-	client *openai.Client,
-	state *State,
-	db Database,
-) error {
+func generateGameStats(i *discordgo.InteractionCreate, s *Skippy) error {
 	daysAgo := 0
 	optionValue, ok := findCommandOption(
 		i.ApplicationCommandData().Options,
@@ -225,7 +193,7 @@ func generateGameStats(
 		daysAgo = int(optionValue.IntValue())
 	}
 
-	sessions, err := db.GetGameSessionsByUserAndDays(i.Member.User.ID, daysAgo)
+	sessions, err := s.DB.GetGameSessionsByUserAndDays(i.Member.User.ID, daysAgo)
 	if err != nil {
 		log.Println("Unable to get game sessions: ", err)
 		return err
@@ -246,7 +214,7 @@ func generateGameStats(
 
 	// respond before sending response to maintain consistent
 	// ChannelTyping behavior
-	err = dg.InteractionRespond(i.Interaction,
+	err = s.DiscordSession.InteractionRespond(i.Interaction,
 		&discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
@@ -259,27 +227,24 @@ func generateGameStats(
 		return err
 	}
 
-	messageReq := openai.MessageRequest{
-		Role:    openai.ChatMessageRoleUser,
-		Content: content,
-	}
-	ctx := context.WithValue(context.Background(), DisableFunctions, true)
-	go getAndSendResponseWithoutTools(
-		ctx,
-		dg,
-		i.ChannelID,
-		messageReq,
-		fmt.Sprintf(GENERATE_GAME_STAT_INSTRUCTIONS, i.Member.Mention()),
-		client,
-		state,
+	go getAndSendResponse(
+		context.Background(),
+		s,
+		ResponseReq{
+			ChannelID:              i.ChannelID,
+			UserID:                 i.Member.User.ID,
+			Message:                content,
+			AdditionalInstructions: fmt.Sprintf(GENERATE_GAME_STAT_INSTRUCTIONS, i.Member.Mention()),
+			DisableTools:           true,
+		},
 	)
+
 	return nil
 }
 
 func toggleGameTracking(
-	dg DiscordSession,
 	i *discordgo.InteractionCreate,
-	config *Config,
+	s *Skippy,
 ) error {
 	var enable bool
 	var remind bool
@@ -320,8 +285,9 @@ func toggleGameTracking(
 	}
 
 	if !enable {
-		delete(config.UserConfigMap, userID)
-		return dg.InteractionRespond(i.Interaction,
+		// TODO: make this a function and write to db
+		delete(s.Config.UserConfigMap, userID)
+		return s.DiscordSession.InteractionRespond(i.Interaction,
 			&discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
@@ -331,7 +297,7 @@ func toggleGameTracking(
 			})
 	}
 
-	config.UserConfigMap[userID] = UserConfig{
+	s.Config.UserConfigMap[userID] = UserConfig{
 		Remind:                 remind,
 		DailyLimit:             dailyLimit,
 		LimitReminderChannelID: channelID,
@@ -342,7 +308,7 @@ func toggleGameTracking(
 	} else {
 		content = "Enabled tracking with no limit"
 	}
-	return dg.InteractionRespond(i.Interaction,
+	return s.DiscordSession.InteractionRespond(i.Interaction,
 		&discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
@@ -352,12 +318,7 @@ func toggleGameTracking(
 		})
 }
 
-func sendChannelMessage(
-	dg DiscordSession,
-	i *discordgo.InteractionCreate,
-	client *openai.Client,
-	state *State,
-) error {
+func sendChannelMessage(i *discordgo.InteractionCreate, s *Skippy) error {
 	optionValue, ok := findCommandOption(
 		i.ApplicationCommandData().Options,
 		CHANNEL,
@@ -387,7 +348,7 @@ func sendChannelMessage(
 		MENTION,
 	)
 	if ok {
-		guild, err := dg.GetState().Guild(i.GuildID)
+		guild, err := s.DiscordSession.GetState().Guild(i.GuildID)
 		if err != nil {
 			log.Println("Could not get guild", err)
 			return err
@@ -400,10 +361,6 @@ func sendChannelMessage(
 
 	message := "prompt: " + prompt + "\n"
 	log.Println("message", message)
-	messageReq := openai.MessageRequest{
-		Role:    openai.ChatMessageRoleUser,
-		Content: message,
-	}
 
 	instructions := SEND_CHANNEL_MSG_INSTRUCTIONS
 	if mentionString != "" {
@@ -415,18 +372,19 @@ func sendChannelMessage(
 		)
 	}
 
-	ctx := context.WithValue(context.Background(), DisableFunctions, true)
-	go getAndSendResponseWithoutTools(
-		ctx,
-		dg,
-		channelID,
-		messageReq,
-		instructions,
-		client,
-		state,
+	go getAndSendResponse(
+		context.Background(),
+		s,
+		ResponseReq{
+			ChannelID:              channelID,
+			UserID:                 i.Member.User.ID,
+			Message:                message,
+			AdditionalInstructions: instructions,
+			DisableTools:           true,
+		},
 	)
 
-	err := dg.InteractionRespond(i.Interaction,
+	err := s.DiscordSession.InteractionRespond(i.Interaction,
 		&discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
@@ -443,14 +401,12 @@ func sendChannelMessage(
 }
 
 func handleWhensGood(
-	dg DiscordSession,
 	i *discordgo.InteractionCreate,
-	state *State,
-	client *openai.Client,
+	s *Skippy,
 ) error {
-	whensGoodResponse := generateWhensGoodResponse(dg, state, client, i)
+	whensGoodResponse := generateWhensGoodResponse(i, s)
 
-	err := dg.InteractionRespond(i.Interaction,
+	err := s.DiscordSession.InteractionRespond(i.Interaction,
 		&discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: whensGoodResponse,
@@ -459,20 +415,15 @@ func handleWhensGood(
 	return err
 }
 
-func handleAlwaysRespond(
-	dg DiscordSession,
-	i *discordgo.InteractionCreate,
-	client *openai.Client,
-	state *State,
-) {
-	enabled := state.ToggleAlwaysRespond(i.ChannelID, client)
+func handleAlwaysRespond(i *discordgo.InteractionCreate, s *Skippy) {
+	enabled := s.State.ToggleAlwaysRespond(i.ChannelID, s.AIClient)
 	var message string
 	if enabled {
 		message = "Turned on always respond"
 	} else {
 		message = "Turned off always respond"
 	}
-	err := dg.InteractionRespond(i.Interaction,
+	err := s.DiscordSession.InteractionRespond(i.Interaction,
 		&discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
@@ -484,100 +435,42 @@ func handleAlwaysRespond(
 	}
 }
 
-func handleHelp(dg DiscordSession, i *discordgo.InteractionCreate) error {
-	if err := sendChunkedChannelMessage(dg, i.ChannelID, GENERAL_HELP); err != nil {
-		return err
+func handleHelp(i *discordgo.InteractionCreate, s *Skippy) error {
+	file, err := os.Open("./instructions/help.md")
+	if err != nil {
+		log.Fatal(err)
 	}
-	if err := sendChunkedChannelMessage(dg, i.ChannelID, AI_FUNCTIONS_HELP); err != nil {
-		return err
-	}
-	if err := sendChunkedChannelMessage(dg, i.ChannelID, COMMANDS_HELP); err != nil {
-		return err
+	defer file.Close()
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	return nil
-}
+	help := string(content)
+	help = strings.ReplaceAll(help, "{BOT_NAME}", string(s.Config.Name))
+	help = strings.ReplaceAll(help, "{BOT_MENTION}", "@" + string(s.Config.Name))
 
-func handleRLSesh(
-	dg DiscordSession,
-	i *discordgo.InteractionCreate,
-	client *openai.Client,
-	state *State,
-	config *Config,
-) error {
-	optionValue, ok := findCommandOption(
-		i.ApplicationCommandData().Options,
-		START_OR_STOP,
+	instructions := fmt.Sprintf(HELP_INSTRUCTIONS, help)
+
+	go getAndSendResponse(
+		context.Background(),
+		s,
+		ResponseReq{
+			ChannelID:              i.ChannelID,
+			UserID:                 i.Member.User.ID,
+			AdditionalInstructions: instructions,
+			DisableTools:           true,
+		},
 	)
-	if !ok {
-		return fmt.Errorf("unable to find slash command option")
-	}
 
-	textOption := optionValue.StringValue()
-	if textOption == "start" {
-		log.Println("Handling rl_sesh start command. creating new thread")
-
-		err := state.ResetOpenAIThread(i.ChannelID, client)
-		if err != nil {
-			return err
-		}
-
-		ctx, cancelFunc := context.WithCancel(context.Background())
-		state.AddCancelFunc(i.ChannelID, cancelFunc, client)
-
-		message := "Started rocket league session"
-		filePath := os.Getenv("RL_DIR")
-		err = StartRocketLeagueSession(
-			ctx,
-			filePath,
-			i.ChannelID,
-			dg,
-			state,
-			client,
-			config,
-		)
-		if err != nil {
-			message = "unable to start rocket leage session"
-		}
-		err = dg.InteractionRespond(i.Interaction,
-			&discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Content: message,
-				},
-			})
-		if err != nil {
-			log.Printf("Error responding to slash command: %s\n", err)
-		}
-	}
-
-	if textOption == "stop" {
-
-		var message string
-		thread, ok := state.GetThread(i.ChannelID)
-		if !ok {
-			message = "unable to stop session no thread found"
-		}
-		cancelFunc := thread.cancelFunc
-		if cancelFunc == nil {
-			message = "Unable to stop session no cancel function"
-		} else {
-			cancelFunc()
-			message = "Stopped rocket league session"
-		}
-
-		err := dg.InteractionRespond(i.Interaction,
-			&discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Content: message,
-				},
-			})
-		if err != nil {
-			log.Printf("Error responding to slash command: %s\n", err)
-		}
-	}
-	return nil
+	return s.DiscordSession.InteractionRespond(i.Interaction,
+		&discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "helping...",
+			},
+		})
 }
 
 func findCommandOption(

@@ -5,6 +5,8 @@ import "github.com/bwmarrin/discordgo"
 // discordgo.Session interface wrapping for modularity and testing
 // implements methods used in this project
 type DiscordSession interface {
+	Open() error
+	Close() error
 	// see discordgo.Session.ChannelMessageSend
 	ChannelMessageSend(
 		channelID, content string,
@@ -37,6 +39,7 @@ type DiscordSession interface {
 	GuildScheduledEventCreate(guildID string, event *discordgo.GuildScheduledEventParams, options ...discordgo.RequestOption) (st *discordgo.GuildScheduledEvent, err error)
 	GuildChannels(guildID string, options ...discordgo.RequestOption) (st []*discordgo.Channel, err error)
 	UserChannelPermissions(userID string, channelID string, fetchOptions ...discordgo.RequestOption) (apermissions int64, err error)
+	ApplicationCommandCreate(appID string, guildID string, cmd *discordgo.ApplicationCommand, options ...discordgo.RequestOption) (ccmd *discordgo.ApplicationCommand, err error)
 
 	AddHandler(handler interface{}) func()
 	InteractionResponseEdit(interaction *discordgo.Interaction, newresp *discordgo.WebhookEdit, options ...discordgo.RequestOption) (*discordgo.Message, error)
