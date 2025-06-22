@@ -43,6 +43,8 @@ type DiscordSession interface {
 
 	AddHandler(handler interface{}) func()
 	InteractionResponseEdit(interaction *discordgo.Interaction, newresp *discordgo.WebhookEdit, options ...discordgo.RequestOption) (*discordgo.Message, error)
+	// Voice channel methods
+	ChannelVoiceJoin(guildID, channelID string, mute, deaf bool) (*discordgo.VoiceConnection, error)
 	// wraps discordgo.Session.State
 	GetState() *discordgo.State
 }
