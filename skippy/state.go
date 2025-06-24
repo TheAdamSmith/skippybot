@@ -1,6 +1,7 @@
 package skippy
 
 import (
+	"fmt"
 	"sync"
 
 	openai "github.com/sashabaranov/go-openai"
@@ -8,9 +9,10 @@ import (
 
 // TODO: make channel id type
 type State struct {
-	threadMap       map[string]*ChatThread
-	userPresenceMap map[string]UserPresence
-	mu              sync.RWMutex
+	threadMap        map[string]*ChatThread
+	userPresenceMap  map[string]UserPresence
+	mu               sync.RWMutex
+	voiceConnections map[string]*VoiceConnection
 }
 
 type ChatThread struct {
@@ -31,8 +33,9 @@ func (thread *ChatThread) Unlock() {
 
 func NewState() *State {
 	return &State{
-		threadMap:       make(map[string]*ChatThread),
-		userPresenceMap: make(map[string]UserPresence),
+		threadMap:        make(map[string]*ChatThread),
+		userPresenceMap:  make(map[string]UserPresence),
+		voiceConnections: make(map[string]*VoiceConnection),
 	}
 }
 
@@ -54,6 +57,32 @@ func (s *State) SetThreadMessages(threadID string, messages []openai.ChatComplet
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.threadMap[threadID].messages = messages
+}
+
+func (s *State) SetVoiceConnection(guildID string, voiceConnection *VoiceConnection) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.voiceConnections[guildID] = voiceConnection
+}
+
+func (s *State) GetVoiceConnection(guildID string) (*VoiceConnection, bool) {
+	s.mu.RLock()
+	defer s.mu.Unlock()
+	vc, ok := s.voiceConnections[guildID]
+	return vc, ok
+}
+
+func (s *State) DeleteVoiceConnection(guildID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	vc, ok := s.voiceConnections[guildID]
+	if !ok {
+		return fmt.Errorf("voice connection from build (%s) does not exist", guildID)
+	}
+	if err := vc.Close(); err != nil {
+		return fmt.Errorf("error closing voice connection: %w", err)
+	}
+	return nil
 }
 
 func (s *State) UpdatePresence(userID string, opts ...UserPresenceOption) {

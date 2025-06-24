@@ -67,17 +67,20 @@ func OnMessageCreate(m *discordgo.MessageCreate, s *Skippy) {
 		s.Scheduler.CancelReminderJob(m.ChannelID)
 	}
 
+	// TODO: create context
 	if strings.HasPrefix(m.Content, "*join") {
-		_, err := JoinVoiceChannel(m, s)
+		vc, err := JoinVoiceChannel(context.Background(), m, s)
 		if err != nil {
 			log.Printf("Failed to join voice channel: %v", err)
 		}
+		s.State.SetVoiceConnection(m.GuildID, vc)
 		return
 	} else if strings.HasPrefix(m.Content, "*leave") {
-		err := LeaveVoiceChannel(m.GuildID, s)
+		err := s.State.DeleteVoiceConnection(m.GuildID)
 		if err != nil {
 			log.Printf("Failed to leave voice channel: %v", err)
 		}
+		log.Println("sucessfully disconnected from voice chanel in guild id: ", m.GuildID)
 		return
 	}
 

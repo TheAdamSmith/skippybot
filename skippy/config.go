@@ -13,12 +13,13 @@ type Config struct {
 	ReminderDurations []time.Duration
 	DefaultModel      string
 	DailyGameLimit    time.Duration
-	BaseInstructions string
+	BaseInstructions  string
 	// discordgo.User.ID -> UserPresenceConfig
 	UserConfigMap map[string]UserConfig
 	WeatherAPIKey string
 	StockAPIKey   string
-	Name BotName
+	AIApiKey      string
+	Name          BotName
 }
 
 type UserConfig struct {
