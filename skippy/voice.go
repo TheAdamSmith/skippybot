@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -55,8 +56,10 @@ TODO:
 - [x] proper cleanup of sockets/connections
 - [x] better async handler
 - [x] error handling
+- [x] connect to eleven labs
+- [] add correct prompting
+- [] remove voice id
 - create real discord command
-- connect to eleven labs
 - implement automatic disconnect
 **/
 
@@ -83,7 +86,7 @@ func JoinVoiceChannel(ctx context.Context, m *discordgo.MessageCreate, s *Skippy
 
 	err = conn.SendMessage(context.Background(), &realtime.SessionUpdateEvent{
 		Session: realtime.ClientSession{
-			Modalities:              []realtime.Modality{realtime.ModalityText, realtime.ModalityAudio},
+			Modalities:              []realtime.Modality{realtime.ModalityText},
 			InputAudioFormat:        realtime.AudioFormatPcm16,
 			InputAudioTranscription: &realtime.InputAudioTranscription{Model: realtime.Whisper1},
 			TurnDetection: &realtime.ClientTurnDetection{
@@ -122,12 +125,62 @@ func JoinVoiceChannel(ctx context.Context, m *discordgo.MessageCreate, s *Skippy
 	}
 
 	go HandleVoice(m.GuildID, vc)
-	go addRealtimeHandlers(ctx, vc)
+	go addTextHandler(ctx, vc)
+	// go addLogger(ctx, vc)
 
 	return vc, nil
 }
 
-func addRealtimeHandlers(ctx context.Context, vc *VoiceConnection) {
+func addLogger(ctx context.Context, vc *VoiceConnection) {
+	responseDeltaHandler := func(ctx context.Context, event realtime.ServerEvent) {
+		log.Println(event.ServerEventType())
+	}
+
+	connHandler := realtime.NewConnHandler(ctx, vc.RealtimeConn, responseDeltaHandler)
+	connHandler.Start()
+}
+
+func addTextHandler(ctx context.Context, vc *VoiceConnection) {
+
+	labsClient := NewLabsClient(
+		os.Getenv("ELEVEN_LABS_API_KEY"),
+		// "ITkrDjydYTCnhgCuIWlv",
+		"nPczCjzI2devNBz1zQrb",
+		"eleven_flash_v2_5",
+		// "opus_48000_96",
+		"pcm_24000",
+		vc.DiscordVoiceConn,
+	)
+	labsClient.encoder = vc.Encoder // TODO: fix
+	if err := labsClient.Start(); err != nil {
+		log.Fatal(err)
+	}
+
+	responseDeltaHandler := func(ctx context.Context, event realtime.ServerEvent) {
+		switch event.ServerEventType() {
+		case realtime.ServerEventTypeResponseTextDelta:
+			event, ok := event.(realtime.ResponseTextDeltaEvent)
+			if !ok {
+				log.Println("could not cast message to type")
+				return
+			}
+			log.Println("sending delta: ", event.Delta)
+			labsClient.Text <- event.Delta
+		case realtime.ServerEventTypeResponseTextDone:
+			labsClient.Text <- ""
+		}
+	}
+
+	connHandler := realtime.NewConnHandler(ctx, vc.RealtimeConn, responseDeltaHandler)
+	connHandler.Start()
+
+	<-connHandler.Err()
+
+	labsClient.Close()
+
+}
+
+func addAudioHandler(ctx context.Context, vc *VoiceConnection) {
 	pcmBuffer := NewPCMBuffer()
 	responseDeltaHandler := func(ctx context.Context, event realtime.ServerEvent) {
 		switch event.ServerEventType() {
