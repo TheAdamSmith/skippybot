@@ -10,6 +10,7 @@ import (
 
 	"skippybot/components"
 
+	realtime "github.com/WqyJh/go-openai-realtime"
 	"github.com/bwmarrin/discordgo"
 	openai "github.com/sashabaranov/go-openai"
 )
@@ -29,6 +30,7 @@ const (
 type Skippy struct {
 	DiscordSession   DiscordSession
 	AIClient         *openai.Client
+	RealtimeClient   *realtime.Client
 	State            *State
 	DB               Database
 	ComponentHandler *components.ComponentHandler
@@ -52,6 +54,7 @@ func NewSkippy(aiClientKey, discordToken string, botName BotName) *Skippy {
 	clientConfig := openai.DefaultConfig(aiClientKey)
 	// clientConfig.BaseURL = "https://api.groq.com/openai/v1/"
 	aiClient := openai.NewClientWithConfig(clientConfig)
+	realtimeClient := realtime.NewClient(aiClientKey)
 
 	var instructionsFilePath string
 	switch botName {
@@ -95,6 +98,7 @@ func NewSkippy(aiClientKey, discordToken string, botName BotName) *Skippy {
 		UserConfigMap:    make(map[string]UserConfig),
 		StockAPIKey:      os.Getenv("ALPHA_VANTAGE_API_KEY"),
 		WeatherAPIKey:    os.Getenv("WEATHER_API_KEY"),
+		AIApiKey:         aiClientKey,
 		Name:             botName,
 	}
 
@@ -112,6 +116,7 @@ func NewSkippy(aiClientKey, discordToken string, botName BotName) *Skippy {
 	return &Skippy{
 		DiscordSession: NewDiscordBot(session),
 		AIClient:       aiClient,
+		RealtimeClient: realtimeClient,
 		// TODO: does this work
 		ComponentHandler: components.NewComponentHandler(session),
 		Config:           config,
