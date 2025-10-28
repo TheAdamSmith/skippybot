@@ -29,6 +29,7 @@ type LabsClient struct {
 	VC           *discordgo.VoiceConnection
 	done         chan struct{}
 	encoder      *gopus.Encoder
+	isStart      bool
 	// decoder      *gopus.Decoder TODO:
 }
 
@@ -41,6 +42,7 @@ func NewLabsClient(apiKey, voiceID, modelID, outputFormat string, vc *discordgo.
 		Text:         make(chan string),
 		VC:           vc,
 		done:         make(chan struct{}),
+		isStart:      true,
 	}
 }
 
@@ -105,8 +107,8 @@ func (lc *LabsClient) writeLoop() {
 		}
 
 		if err := lc.conn.WriteJSON(map[string]any{
-			"text":                   text + " ",
-			"try_trigger_generation": true,
+			"text": text,
+			// "try_trigger_generation": true,
 		}); err != nil {
 			log.Println("write error:", err)
 			return
@@ -125,6 +127,7 @@ func (lc *LabsClient) flush() {
 		log.Println("flush error:", err)
 		return
 	}
+	lc.isStart = true
 }
 
 func (lc *LabsClient) readLoop() {
@@ -149,7 +152,7 @@ func (lc *LabsClient) readLoop() {
 	// 	for opusPacket := range opusBuffer {
 	// 	}
 	// }()
-
+	start := time.Now()
 	for {
 		_, buf, err := lc.conn.ReadMessage()
 		log.Println("recieved message")
@@ -179,9 +182,15 @@ func (lc *LabsClient) readLoop() {
 		if err != nil {
 			log.Println("error could note decode base64 string to pcm: ", err)
 		}
+		log.Println("time sinnce", time.Since(start))
+		start = time.Now()
 
 		pcmBuffer.Write(pcmArr)
 
+		if lc.isStart {
+			time.Sleep(200 * time.Millisecond)
+			lc.isStart = false
+		}
 		for {
 			frame, ok := pcmBuffer.ReadFrame(frameSize)
 			if !ok {
@@ -193,11 +202,8 @@ func (lc *LabsClient) readLoop() {
 				log.Println("opus encode error: ", err)
 			}
 
+			// <-ticker.C
 			lc.VC.OpusSend <- opusFrame
-			// opusBuffer <- opusFrame
-			//
-			// frameSent++
-			// log.Println(frameSent)
 		}
 	}
 }
